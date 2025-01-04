@@ -7,12 +7,13 @@
 #include <algorithm>
 #include <thread>
 #include <atomic>
+#include <chrono>
 
 constexpr int kMargin = 6;
 constexpr int kNpoints = 4;
 constexpr int kPattern[kNpoints] = {2 + 2*kNx, 2 - 2*kNx, -2 + 2*kNx, -2 - 2*kNx };
 constexpr int kNbits  = (kNx - 2*kMargin)*(kNy - 2*kMargin)*kNpoints;
-constexpr int kNbytes = (kNbits + 31)/32;
+constexpr int kNu32 = (kNbits + 31)/32;
 
 constexpr double kSigma = 6.;
 constexpr double kAlpha = 38.;
@@ -72,7 +73,7 @@ struct Image {
     const uint8_t * data;
     int sum = 0;
     int sum2 = 0;
-    uint32_t bits[kNbytes];
+    uint32_t bits[kNu32];
     Image(const uint8_t * A) : data(A) {
         sum = sum2 = 0;
         for (int j = 0; j < kSize; ++j) {
@@ -106,15 +107,12 @@ static std::vector<Image> prepareTrainingData(int nimage, const uint8_t * allDat
 
 static inline float computeCC(const Image& a, const Image& b) {
     int non = 0;
-    for (int i = 0; i < kNbytes; ++i) non += popcount(a.bits[i] & b.bits[i]);
+    for (int i = 0; i < kNu32; ++i) non += popcount(a.bits[i] & b.bits[i]);
     float ccb = 1 - 1.f*non/kNbits;
     int sumab = 0;
     for (int j = 0; j < kSize; ++j) sumab += int(a.data[j])*int(b.data[j]);
     float norm = kSize;
     float denom = (norm*a.sum2 - a.sum*a.sum)*(norm*b.sum2 - b.sum*b.sum);
-    if (denom <= 0) {
-        printf("Oops: denom = %g\n", denom); exit(1);
-    }
     float cc = denom > 0 ? 1.f - (norm*sumab - a.sum*b.sum)/sqrt(denom) : 2.f;
     return 0.125f*cc + ccb;
 }
@@ -163,6 +161,9 @@ int main(int argc, char **argv) {
          }
     };
 
+    printf("Predicting %d test images...", kNtest);
+    fflush(stdout);
+    auto tim1 = std::chrono::steady_clock::now();
     std::atomic<int> counter(0);
     auto compute = [&counter, &processChunk]() {
         constexpr int chunk = 64;
@@ -177,13 +178,19 @@ int main(int argc, char **argv) {
     for (auto& w : workers) w = std::thread(compute);
     compute();
     for (auto& w : workers) w.join();
+    auto tim2 = std::chrono::steady_clock::now();
+    auto time = 1e-3*std::chrono::duration_cast<std::chrono::microseconds>(tim2-tim1).count();
+    printf("done in %g ms -> %g ms per image\n\n", time, time/kNtest);
 
-    printf("Ngood:\n");
+    printf("neighbors | error (%c)\n", '%');
+    printf("----------|-----------\n");
     for (int n=1; n<=4*nneighb; ++n) {
         auto& p = predicted[n-1];
         int ngood = 0;
         for (uint32_t i=0; i<kNtest; ++i) if (p[i] == testLabels[i]) ++ngood;
-        printf("%d  %d\n",n,ngood);
+        float err = 100.f*(kNtest - ngood)/kNtest;
+        printf("   %3d    |  %.3f\n", n, err);
     }
+
     return 0;
 }
