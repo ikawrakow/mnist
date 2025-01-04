@@ -72,7 +72,7 @@ struct Image {
         }
         uint32_t u = 0;
         int bit = 0, l = 0;
-        constexpr int kShift = 3;
+        constexpr int kShift = 1;
         for (int y = kMargin; y < kNy - kMargin; ++y) for (int x = kMargin; x < kNx - kMargin; ++x) {
             int j = x + y*kNx;
             auto a = A[j] >> kShift;
@@ -125,6 +125,9 @@ int main(int argc, char **argv) {
 
     auto testImages = getTestImages();
     if (testImages.size() != kNtest*kSize) return 1;
+
+    for (auto& a : images) a >>= 2;
+    for (auto& a : testImages) a >>= 2;
 
     auto train = prepareTrainingData(kNtrain, images.data());
 
