@@ -35,19 +35,6 @@ public:
         data_[i] = a;
     }
     void reset() { nhave_ = 0; }
-    int nHave() const { return nhave_; }
-    bool allSame() const {
-        if (nhave_ < nmax_) return false;
-        int l = data_[0].second;
-        for (int i=1; i<nmax_; ++i) if (data_[i].second != l) return false;
-        return true;
-    }
-    bool allSame(int n) const {
-        if (nhave_ < n) return false;
-        int l = data_[0].second;
-        for (int i=1; i<n; ++i) if (data_[i].second != l) return false;
-        return true;
-    }
     int predict(int n) const {
         if (nhave_ < n) return -1;
         float X[10] = {};
@@ -109,10 +96,8 @@ static std::vector<Image> prepareTrainingData(int nimage, const uint8_t * allDat
 
 static inline float computeCC(const Image& a, const Image& b) {
     int non = 0;
-    //for (int i = 0; i < kNbytes; ++i) non += popcount(a.bits[i] & b.bits[i]);
-    //float ccb = 1 - 1.f*non/kNbits;
-    for (int i = 0; i < kNbytes; ++i) non += popcount(a.bits[i] ^ b.bits[i]);
-    float ccb = 1.f*non/kNbits;
+    for (int i = 0; i < kNbytes; ++i) non += popcount(a.bits[i] & b.bits[i]);
+    float ccb = 1 - 1.f*non/kNbits;
     int sumab = 0;
     for (int j = 0; j < kSize; ++j) sumab += int(a.data[j])*int(b.data[j]);
     float norm = kSize;
@@ -121,8 +106,7 @@ static inline float computeCC(const Image& a, const Image& b) {
         printf("Oops: denom = %g\n", denom); exit(1);
     }
     float cc = denom > 0 ? 1.f - (norm*sumab - a.sum*b.sum)/sqrt(denom) : 2.f;
-    //return 0.125f*cc + ccb;
-    return 0.25f*cc + ccb;
+    return 0.125f*cc + ccb;
 }
 
 int main(int argc, char **argv) {
@@ -178,12 +162,14 @@ int main(int argc, char **argv) {
     compute();
     for (auto& w : workers) w.join();
 
-    printf("Ngood:\n");
+    printf("neighbors | error (%c)\n", '%');
+    printf("----------|-----------\n");
     for (int n=1; n<=4*nneighb; ++n) {
         auto& p = predicted[n-1];
         int ngood = 0;
         for (uint32_t i=0; i<kNtest; ++i) if (p[i] == testLabels[i]) ++ngood;
-        printf("%d  %d\n",n,ngood);
+        float err = 100.f*(kNtest - ngood)/kNtest;
+        printf("   %3d    |  %.3f\n", n, err);
     }
     return 0;
 }
