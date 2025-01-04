@@ -11,7 +11,7 @@ constexpr int kMargin = 6;
 constexpr int kNpoints = 4;
 constexpr int kPattern[kNpoints] = {2 + 2*kNx, 2 - 2*kNx, -2 + 2*kNx, -2 - 2*kNx };
 constexpr int kNbits  = (kNx - 2*kMargin)*(kNy - 2*kMargin)*kNpoints;
-constexpr int kNbytes = (kNbits + 31)/32;
+constexpr int kNu32 = (kNbits + 31)/32;
 
 #ifdef _MSC_VER
 #include <intrin.h>
@@ -62,7 +62,7 @@ struct Image {
     const uint8_t * data;
     int sum = 0;
     int sum2 = 0;
-    uint32_t bits[kNbytes];
+    uint32_t bits[kNu32];
     Image(const uint8_t * A) : data(A) {
         sum = sum2 = 0;
         for (int j = 0; j < kSize; ++j) {
@@ -96,7 +96,7 @@ static std::vector<Image> prepareTrainingData(int nimage, const uint8_t * allDat
 
 static inline float computeCC(const Image& a, const Image& b) {
     int non = 0;
-    for (int i = 0; i < kNbytes; ++i) non += popcount(a.bits[i] & b.bits[i]);
+    for (int i = 0; i < kNu32; ++i) non += popcount(a.bits[i] & b.bits[i]);
     float ccb = 1 - 1.f*non/kNbits;
     int sumab = 0;
     for (int j = 0; j < kSize; ++j) sumab += int(a.data[j])*int(b.data[j]);
