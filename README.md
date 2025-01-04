@@ -52,3 +52,22 @@ All we need for a kNN model is a similarity (or distance) metric between pairs o
 
 ![v1](https://github.com/user-attachments/assets/594ad6f8-1dc9-44ab-968b-37fa1c0c3145)
 
+### V2
+
+How can we improve? Let's add some translations. Basically, take each training image and add shifted versions of it within `-smax...smax` (in x- and y-directions), where `smax` is a command line parameter to `mnist_knn_v2.cpp`. This indeed improves the prediction accuracy as can be seen in the following graph, which shows results for `smax = 1` (i.e., shifts of +/- 1 pixel). Prediction accuracy is now ~1.9%, so on par with the `ggml` `mnist` example. But this comes at the e4pxense of a much longer run time - 1.4 ms per prediction.
+
+![v2](https://github.com/user-attachments/assets/1022b986-a015-4acc-bbbc-157f97157737)
+
+### V3
+
+Shifting the position of the digits is good, but we also know (see) that elastic deformations would be better. This is what happens in `mnist_knn_v3.cpp`. We generate randomly deformed versions of the training images [here](https://github.com/ikawrakow/mnist/blob/8ad1aa11bdbda0b7e1279965e6e9a06b2d970ef6/imageUtils.cpp#L89). We create random vector deformation fields by
+* Sample random vectors in `(-1...1, -1...1)`
+* Filter it with a very wide Gaussian filter
+* Multiply the resulting filtered deformation vectors with a suitable constant factor $\alpha$
+
+With some experimentation $\sigma = 6, \alpha = 38$ seem to work quite well. With this and 40 deformed versions of the training data we can bring the error down to 1.3-1.4% at the expense of increasing run time even further to about 6.3 ms/prediction.
+![v3](https://github.com/user-attachments/assets/8711a269-f3ad-40fb-9884-319bfb1e11ac)
+
+
+
+
