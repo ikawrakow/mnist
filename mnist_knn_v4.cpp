@@ -5,14 +5,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
-#include <memory>
+//#include <memory>
 #include <algorithm>
 #include <thread>
 #include <atomic>
 #include <chrono>
-#include <mutex>
-#include <array>
-#include <fstream>
+//#include <mutex>
+//#include <array>
+//#include <fstream>
 
 constexpr int kMargin = 6;
 
@@ -54,10 +54,9 @@ static void computeSums(const uint8_t *A, int &suma, int &suma2) {
     suma = sa; suma2 = sa2;
 }
 
-std::vector<int> getPattern() {
-    return std::vector<int>{1+kNx, -1+kNx, 1-kNx, -1-kNx };
-    //return std::vector<int>{2+2*kNx, -2+2*kNx, 2-2*kNx, -2-2*kNx };
-    //return std::vector<int>{1+kNx, -1+kNx, 1-kNx, -1-kNx, 2, -2, 2*kNx, -2*kNx };
+const std::vector<int>& getPattern() {
+    static std::vector<int> pattern{1+kNx, -1+kNx, 1-kNx, -1-kNx};
+    return pattern;
 }
 
 static void prepareOther(const std::vector<int> &pattern, const uint8_t  *A, uint32_t *B) {
@@ -82,11 +81,6 @@ static inline float computeOther(int n, const uint32_t *A, const uint32_t *B) {
         m += __builtin_popcount(a);
     }
     return 1 - (1.f*m)/(32*n);
-    //for (int j=0; j<n; ++j) {
-    //    auto a = A[j] ^ B[j];
-    //    m += __builtin_popcount(a);
-    //}
-    //return 1.f*m/(32*n);
 }
 
 static void computeProjection(const uint8_t *A, uint16_t *B, int &sumxb, int &sumxb2, int &sumyb, int &sumyb2) {
@@ -129,12 +123,10 @@ static inline float computeCC(const uint8_t *A, const uint8_t *B, int sa, int sa
 int main(int argc, char **argv) {
 
     int nneighb = argc > 1 ? atoi(argv[1]) : 5;
-    float thresh = argc > 2 ? atof(argv[2]) : 0.25f;
-    float sigma = argc > 3 ? atof(argv[3]) : 6;
-    float alpha = argc > 4 ? atof(argv[4]) : 38;
-    int nadd = argc > 5 ? atoi(argv[5]) : 5;
-    float beta = argc > 6 ? atof(argv[6]) : 1.f;
-    int nthread = argc > 7 ? atoi(argv[7]) : std::thread::hardware_concurrency();
+    int nadd = argc > 2 ? atoi(argv[2]) : 5;
+    float thresh = argc > 3 ? atof(argv[3]) : 0.25f;
+    float beta = argc > 4 ? atof(argv[4]) : 1.f;
+    int nthread = argc > 5 ? atoi(argv[5]) : std::thread::hardware_concurrency();
 
     auto labels = getTraningLabels();
     if (labels.size() != kNtrain) return 1;
@@ -148,13 +140,13 @@ int main(int argc, char **argv) {
     auto testImages = getTestImages();
     if (testImages.size() != kNtest*kSize) return 1;
 
-    if (nadd > 0) addElasticDeformationsSameT(images,labels,nadd,sigma,alpha,0,nullptr);
+    addElasticDeformationsSameT(images,labels,nadd);
     int ntrain = labels.size();
 
     std::vector<std::thread> workers(nthread-1);
 
     printf("Creating pattern with 4 points. margin=%d\n", kMargin);
-    auto pattern = getPattern();
+    auto& pattern = getPattern();
     int nbit = (kNx-2*kMargin)*(kNy-2*kMargin)*pattern.size();
     int osize = (nbit + 31)/32;
     printf("nbit = %d, osize = %d\n",nbit,osize);
@@ -191,12 +183,21 @@ int main(int argc, char **argv) {
 
     std::vector<int> sumPA((int64_t)ntrain * 4);
     std::vector<uint16_t> projA((int64_t)ntrain * (kNx+kNy));
-    auto A = images.data(); auto P = projA.data(); auto S = sumPA.data();
-    for (int i=0; i<ntrain; ++i) {
-        computeProjection(A,P,S[0],S[1],S[2],S[3]);
-        A += kSize; P += kNx+kNy; S += 4;
+    {
+        printf("Computing training projections...");
+        fflush(stdout);
+        auto t1 = std::chrono::steady_clock::now();
+        auto A = images.data(); auto P = projA.data(); auto S = sumPA.data();
+        for (int i=0; i<ntrain; ++i) {
+            computeProjection(A,P,S[0],S[1],S[2],S[3]);
+            A += kSize; P += kNx+kNy; S += 4;
+        }
+        auto t2 = std::chrono::steady_clock::now();
+        auto time = 1e-3*std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
+        printf("done in %g ms\n", time);
     }
-    int smax = 2;
+
+    const int smax = 2;
 
     std::vector<std::vector<int>> predicted(4*nneighb);
     for (auto & p : predicted) p.resize(kNtest);
@@ -221,7 +222,6 @@ int main(int argc, char **argv) {
              for (int ky=-smax; ky<=smax; ++ky) for (int kx=-smax; kx<=smax; ++kx) {
                  int k = smax+kx + (smax+ky)*(2*smax+1);
                  transform(kNx,kNy,B,kx,ky,shiftedB.data()+k*kSize);
-                 //computeMatrix(shiftedB.data()+k*kSize,m0,m1,m2,auxS[2*k],auxS[2*k+1]);
                  computeSums(shiftedB.data()+k*kSize,auxS[2*k],auxS[2*k+1]);
                  prepareOther(pattern,shiftedB.data()+k*kSize,otherB.data()+k*osize);
              }
@@ -281,6 +281,10 @@ int main(int argc, char **argv) {
          }
     };
 
+    printf("Predicting %d test images...", kNtest);
+    fflush(stdout);
+    auto tim1 = std::chrono::steady_clock::now();
+
     counter = 0; chunk = 64;
     auto compute = [&counter, &processChunk, chunk]() {
         while(1) {
@@ -295,12 +299,19 @@ int main(int argc, char **argv) {
     compute();
     for (auto& w : workers) w.join();
 
-    printf("Ngood:\n");
+    auto tim2 = std::chrono::steady_clock::now();
+    auto time = 1e-3*std::chrono::duration_cast<std::chrono::microseconds>(tim2-tim1).count();
+    printf("done in %g ms -> %g ms per image\n\n", time, time/kNtest);
+
+    printf("neighbors | error (%c)\n", '%');
+    printf("----------|-----------\n");
     for (int n=1; n<=4*nneighb; ++n) {
         auto& p = predicted[n-1];
         int ngood = 0;
         for (uint32_t i=0; i<kNtest; ++i) if (p[i] == testLabels[i]) ++ngood;
-        printf("%d  %d\n",n,ngood);
+        float err = 100.f*(kNtest - ngood)/kNtest;
+        printf("   %3d    |  %.3f\n", n, err);
     }
+
     return 0;
 }

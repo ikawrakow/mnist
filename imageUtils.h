@@ -7,6 +7,8 @@
 
 void addElasticDeformationsSameT(std::vector<uint8_t>& images, std::vector<uint8_t>& labels, int nAdd, double sigGauss, double alpha, int seq, const char* fname);
 
+void addElasticDeformationsSameT(std::vector<uint8_t>& images, std::vector<uint8_t>& labels, int nAdd);
+
 static inline int toNearestInt(float fval) noexcept {
     assert(fval <= 4194303.f);
     constexpr float kSnapper=3<<22;

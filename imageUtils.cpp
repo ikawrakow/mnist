@@ -158,3 +158,8 @@ void addElasticDeformationsSameT(std::vector<uint8_t>& images, std::vector<uint8
     }
 }
 
+void addElasticDeformationsSameT(std::vector<uint8_t>& images, std::vector<uint8_t>& labels, int nAdd) {
+    if (nAdd < 1) return;
+    addElasticDeformationsSameT(images, labels, nAdd, 6., 38., 0, nullptr);
+}
+
