@@ -118,7 +118,7 @@ void addElasticDeformationsSameT(std::vector<uint8_t>& images, std::vector<uint8
             int last = std::min(nimage, first + chunk);
             for (int i=first; i<last; ++i) {
                 const uint8_t* A = &images[i*kSize];
-                uint64_t start1 = nimage + i*nAdd;
+                uint64_t start1 = nimage + i; //nimage + i*nAdd;
                 uint64_t start2 = start1*kSize;
                 uint8_t* B = &images[start2], *L = &labels[start1];
                 const float *ux = uxb.data(), *uy = uyb.data();
@@ -140,7 +140,10 @@ void addElasticDeformationsSameT(std::vector<uint8_t>& images, std::vector<uint8
                         }
                         else B[x+y*kNx] = 0;
                     }
-                    B += kSize; *L++ = labels[i];
+                    *L = labels[i];
+                    B += kSize*nimage;
+                    L += nimage;
+                    //B += kSize; *L++ = labels[i];
                     ux += Nx*Ny; uy += Nx*Ny;
                 }
             }

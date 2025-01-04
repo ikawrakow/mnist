@@ -37,7 +37,7 @@ static inline void transform(int Nx, int Ny, const uint8_t *A, int kx, int ky, u
 }
 
 static inline void computeMatrix(const uint8_t *A, float &m0, float &m1, float &m2, int &suma, int &suma2) {
-    constexpr int kThresh = 128;
+    constexpr int kThresh = 64; //128;
     int sx = kNx/2, sy = kNy/2;
     int M0 = 0, M1 = 0, M2 = 0, s = 0, j = 0, sa = 0, sa2 = 0;
     for (int y=0; y<kNy; ++y) for (int x=0; x<kNx; ++x) {
@@ -67,11 +67,12 @@ const std::vector<int>& getPattern() {
 }
 
 static void prepareOther(const std::vector<int> &pattern, const uint8_t  *A, uint32_t *B) {
+    constexpr int kShift = 1;
     uint32_t u = 0, m = 1;
     for (int y=kMargin; y<kNy-kMargin; ++y) for (int x=kMargin; x<kNx-kMargin; ++x) {
-        int j = x + y*kNx; uint8_t a = A[j] >> 2;
+        int j = x + y*kNx; uint8_t a = A[j] >> kShift;
         for (auto dj : pattern) {
-            uint8_t a1 = A[j+dj] >> 2;
+            uint8_t a1 = A[j+dj] >> kShift;
             if (a > a1) u |= m;
             m <<= 1;
             if (!m) {
@@ -133,8 +134,9 @@ int main(int argc, char **argv) {
     int nneighb = argc > 1 ? atoi(argv[1]) : 5;
     int nadd = argc > 2 ? atoi(argv[2]) : 5;
     float thresh = argc > 3 ? atof(argv[3]) : 0.25f;
-    float beta = argc > 4 ? atof(argv[4]) : 1.f;
-    int nthread = argc > 5 ? atoi(argv[5]) : std::thread::hardware_concurrency();
+    int speed = argc > 4 ? atoi(argv[4]) : 1;
+    float beta = argc > 5 ? atof(argv[5]) : 1.f;
+    int nthread = argc > 6 ? atoi(argv[6]) : std::thread::hardware_concurrency();
 
     auto labels = getTraningLabels();
     if (labels.size() != kNtrain) return 1;
@@ -147,6 +149,9 @@ int main(int argc, char **argv) {
 
     auto testImages = getTestImages();
     if (testImages.size() != kNtest*kSize) return 1;
+
+    for (auto& a : images) a >>= 1;
+    for (auto& a : testImages) a >>= 1;
 
     addElasticDeformationsSameT(images,labels,nadd);
     int ntrain = labels.size();
@@ -198,7 +203,7 @@ int main(int argc, char **argv) {
     std::vector<std::vector<int>> predicted(4*nneighb);
     for (auto & p : predicted) p.resize(kNtest);
     auto processChunk = [&allM, &allSums, &images, &labels, &testImages, &predicted, &projA, &sumPA,
-         &pattern, &otrain, thresh, nneighb, ntrain, osize, beta](int first, int last) {
+         &pattern, &otrain, thresh, nneighb, ntrain, osize, beta, speed](int first, int last) {
          constexpr int smax = 2;
          std::vector<uint8_t> shiftedB((2*smax+1)*(2*smax+1)*kSize);
          std::vector<uint32_t> otherB((2*smax+1)*(2*smax+1)*osize);
@@ -231,7 +236,7 @@ int main(int argc, char **argv) {
                      auto b = x1 >= 0 && x1 < kNx ? projB[x1] : 0;
                      p[x] = b; ssb += b; ssb2 += b*b;
                  }
-                 auxPx[2*(kx+smax)] = ssb;
+                 auxPx[2*(kx+smax)+0] = ssb;
                  auxPx[2*(kx+smax)+1] = ssb2;
              }
              for (int ky=-smax; ky<=smax; ++ky) {
@@ -242,13 +247,13 @@ int main(int argc, char **argv) {
                      auto b = y1 >= 0 && y1 < kNy ? projB[kNx+y1] : 0;
                      p[y] = b; ssb += b; ssb2 += b*b;
                  }
-                 auxPy[2*(ky+smax)] = ssb;
+                 auxPy[2*(ky+smax)+0] = ssb;
                  auxPy[2*(ky+smax)+1] = ssb2;
              }
              auto Pa = projA.data(); auto Sp = sumPA.data();
              auto A = images.data(); auto S = allSums.data(); auto M = allM.data();
              for (int t=0; t<ntrain; ++t) {
-                 if (t == kNtrain && nnhandler.allSame(4*nneighb)) break;
+                 if (speed == 1 && t == kNtrain && nnhandler.allSame(4*nneighb)) break;
                  float d2 = (M[0]-m0)*(M[0]-m0)+(M[1]-m1)*(M[1]-m1)+(M[2]-m2)*(M[2]-m2);
                  if (d2 < 75) {
                      float bestccpx = std::numeric_limits<float>::max(); int bestkx = 0;
@@ -270,6 +275,7 @@ int main(int argc, char **argv) {
                  }
                  Pa += kNx+kNy; Sp += 4;
                  A += kSize; S += 2; M += 3;
+                 if (speed >= 2 && (t + 1)%kNtrain == 0 && nnhandler.allSame(4*nneighb)) break;
              }
              for (int n=1; n<=4*nneighb; ++n) predicted[n-1][i] = nnhandler.predict(n);
              B += kSize;
