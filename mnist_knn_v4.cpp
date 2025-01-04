@@ -154,8 +154,10 @@ int main(int argc, char **argv) {
 
     std::vector<float> allM(3*ntrain);
     std::vector<int> allSums(2*ntrain);
+    std::vector<int> sumPA((int64_t)ntrain * 4);
+    std::vector<uint16_t> projA((int64_t)ntrain * (kNx+kNy));
     std::atomic<int> counter(0); int chunk = 128;
-    auto prepare = [&counter, &images, &otrain, &pattern, &allM, &allSums, ntrain, osize, chunk]() {
+    auto prepare = [&counter, &images, &otrain, &pattern, &allM, &allSums, &projA, &sumPA, ntrain, osize, chunk]() {
         while(1) {
             int first = counter.fetch_add(chunk);
             if (first >= ntrain) break;
@@ -164,10 +166,14 @@ int main(int argc, char **argv) {
             auto oA = otrain.data() + (int64_t)first * osize;
             auto M = allM.data() + 3*first;
             auto S = allSums.data() + 2*first;
+            auto P = projA.data() + (kNx+kNy)*uint64_t(first);
+            auto Sp = sumPA.data() + 4*first;
             for (int i=first; i<last; ++i) {
                 prepareOther(pattern,A,oA);
                 computeMatrix(A,M[0],M[1],M[2],S[0],S[1]);
+                computeProjection(A,P,Sp[0],Sp[1],Sp[2],Sp[3]);
                 A += kSize; oA += osize; M += 3; S += 2;
+                P += kNx+kNy; Sp += 4;
             }
         }
     };
@@ -178,31 +184,14 @@ int main(int argc, char **argv) {
         prepare();
         for (auto & w : workers) w.join();
         auto t2 = std::chrono::steady_clock::now();
-        printf("It took %g ms to prepare the data\n",1e-3*std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count());
+        printf("It took %g ms to prepare the training data\n",1e-3*std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count());
     }
-
-    std::vector<int> sumPA((int64_t)ntrain * 4);
-    std::vector<uint16_t> projA((int64_t)ntrain * (kNx+kNy));
-    {
-        printf("Computing training projections...");
-        fflush(stdout);
-        auto t1 = std::chrono::steady_clock::now();
-        auto A = images.data(); auto P = projA.data(); auto S = sumPA.data();
-        for (int i=0; i<ntrain; ++i) {
-            computeProjection(A,P,S[0],S[1],S[2],S[3]);
-            A += kSize; P += kNx+kNy; S += 4;
-        }
-        auto t2 = std::chrono::steady_clock::now();
-        auto time = 1e-3*std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
-        printf("done in %g ms\n", time);
-    }
-
-    const int smax = 2;
 
     std::vector<std::vector<int>> predicted(4*nneighb);
     for (auto & p : predicted) p.resize(kNtest);
     auto processChunk = [&allM, &allSums, &images, &labels, &testImages, &predicted, &projA, &sumPA,
-         &pattern, &otrain, thresh, nneighb, ntrain, osize, beta, smax](int first, int last) {
+         &pattern, &otrain, thresh, nneighb, ntrain, osize, beta](int first, int last) {
+         constexpr int smax = 2;
          std::vector<uint8_t> shiftedB((2*smax+1)*(2*smax+1)*kSize);
          std::vector<uint32_t> otherB((2*smax+1)*(2*smax+1)*osize);
          std::vector<std::vector<uint16_t>> projBx(2*smax+1);
@@ -253,7 +242,7 @@ int main(int argc, char **argv) {
              for (int t=0; t<ntrain; ++t) {
                  if (t == kNtrain && nnhandler.allSame(4*nneighb)) break;
                  float d2 = (M[0]-m0)*(M[0]-m0)+(M[1]-m1)*(M[1]-m1)+(M[2]-m2)*(M[2]-m2);
-                 if (d2 < 75) { //60) {
+                 if (d2 < 75) {
                      float bestccpx = 1e30; int bestkx = 0;
                      for (int kx=-smax; kx<=smax; ++kx) {
                          auto cc = computeProjectionCC(kNx,Pa,projBx[kx+smax].data(),Sp[0],Sp[1],auxPx[2*(kx+smax)],auxPx[2*(kx+smax)+1]);

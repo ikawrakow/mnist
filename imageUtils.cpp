@@ -98,6 +98,7 @@ void addElasticDeformationsSameT(std::vector<uint8_t>& images, std::vector<uint8
     images.resize(ntot);
     int margin = toNearestInt(2*sigGauss);
     int Nx = kNx + 2*margin, Ny = kNy + 2*margin;
+    auto t1 = std::chrono::steady_clock::now();
     std::vector<float> ux(Nx*Ny), uy(Nx*Ny), uxb(nAdd*Nx*Ny), uyb(nAdd*Nx*Ny);
     GaussianBlur gauss(sigGauss,Nx,Ny);
     for (int it=0; it<nAdd; ++it) {
@@ -106,6 +107,8 @@ void addElasticDeformationsSameT(std::vector<uint8_t>& images, std::vector<uint8
         gauss.blurImage(uy.data(), &uyb[it*Nx*Ny]);
         for (int i=0; i<Nx*Ny; ++i) { uxb[it*Nx*Ny+i] *= alpha; uyb[it*Nx*Ny+i] *= alpha; }
     }
+    auto t2 = std::chrono::steady_clock::now();
+    printf("%s: it took %g ms to create %d deformation fields\n", __func__, 1e-3*std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count(), nAdd);
     std::atomic<int> counter(0);
     auto compute = [&counter, &images, &labels, &uxb, &uyb, nimage, nAdd, Nx, Ny, margin]() {
         int chunk = 64;
