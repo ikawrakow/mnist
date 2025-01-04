@@ -3,33 +3,40 @@
 #include "knnHandler.h"
 
 #include <cstdio>
+#include <cassert>
 #include <cstdlib>
 #include <cmath>
-//#include <memory>
 #include <algorithm>
 #include <thread>
 #include <atomic>
 #include <chrono>
-//#include <mutex>
-//#include <array>
-//#include <fstream>
+#include <limits>
+#include <cstring>
+
+#ifdef _MSC_VER
+#include <intrin.h>
+inline int popcount(uint32_t x) { return __popcnt(x); }
+#else
+constexpr int popcount(uint32_t x) { return __builtin_popcount(x); }
+#endif
 
 constexpr int kMargin = 6;
 
-static void transform(int Nx, int Ny, const uint8_t *A, int kx, int ky, uint8_t *B) {
-    for (int y=0; y<Ny; ++y) {
+static inline void transform(int Nx, int Ny, const uint8_t *A, int kx, int ky, uint8_t *B) {
+    int ymin = 0, ymax = kNy;
+    if (ky < 0) { std::memset(B, 0, -ky*Nx*sizeof(uint8_t)); ymin = -ky; }
+    else if (ky > 0) { std::memset(B + (Ny-1-ky)*Nx, 0, ky*Nx*sizeof(uint8_t)); ymax = Ny-ky; }
+    for (int y=ymin; y<ymax; ++y) {
         int y1 = y + ky;
-        if (y1 >= 0 && y1 < Ny) {
-            for (int x=0; x<Nx; ++x) {
-                int x1 = x + kx;
-                B[x+y*kNx] = x1 >= 0 && x1 < Nx ? A[x1+y1*Nx] : 0;
-            }
+        auto By = B + y*Nx;
+        for (int x=0; x<Nx; ++x) {
+            int x1 = x + kx;
+            By[x] = x1 >= 0 && x1 < Nx ? A[x1+y1*Nx] : 0;
         }
-        else for (int x=0; x<Nx; ++x) B[x+y*Nx] = 0;
     }
 }
 
-static void computeMatrix(const uint8_t *A, float &m0, float &m1, float &m2, int &suma, int &suma2) {
+static inline void computeMatrix(const uint8_t *A, float &m0, float &m1, float &m2, int &suma, int &suma2) {
     constexpr int kThresh = 128;
     int sx = kNx/2, sy = kNy/2;
     int M0 = 0, M1 = 0, M2 = 0, s = 0, j = 0, sa = 0, sa2 = 0;
@@ -46,10 +53,10 @@ static void computeMatrix(const uint8_t *A, float &m0, float &m1, float &m2, int
     suma = sa; suma2 = sa2;
 }
 
-static void computeSums(const uint8_t *A, int &suma, int &suma2) {
-    int j = 0, sa = 0, sa2 = 0;
-    for (int y=0; y<kNy; ++y) for (int x=0; x<kNx; ++x) {
-        int a = A[j++]; sa += a; sa2 += a*a;
+static inline void computeSums(const uint8_t *A, int &suma, int &suma2) {
+    int sa = 0, sa2 = 0;
+    for (int j = 0; j < kSize; ++j) {
+        int a = A[j]; sa += a; sa2 += a*a;
     }
     suma = sa; suma2 = sa2;
 }
@@ -60,25 +67,26 @@ const std::vector<int>& getPattern() {
 }
 
 static void prepareOther(const std::vector<int> &pattern, const uint8_t  *A, uint32_t *B) {
-    uint32_t u = 0; int bit = 0;
+    uint32_t u = 0, m = 1;
     for (int y=kMargin; y<kNy-kMargin; ++y) for (int x=kMargin; x<kNx-kMargin; ++x) {
-        int j = x + y*kNx; int a = A[j] >> 2;
+        int j = x + y*kNx; uint8_t a = A[j] >> 2;
         for (auto dj : pattern) {
-            int a1 = A[j+dj] >> 2;
-            if (a > a1) u |= (1u << bit);
-            if (++bit == 32) {
-                *B++ = u; u = 0; bit = 0;
+            uint8_t a1 = A[j+dj] >> 2;
+            if (a > a1) u |= m;
+            m <<= 1;
+            if (!m) {
+                *B++ = u; u = 0; m = 1;
             }
         }
     }
-    if (bit > 0) *B++ = u;
+    if (m > 1) *B++ = u;
 }
 
 static inline float computeOther(int n, const uint32_t *A, const uint32_t *B) {
     int m = 0;
     for (int j=0; j<n; ++j) {
         auto a = A[j] & B[j];
-        m += __builtin_popcount(a);
+        m += popcount(a);
     }
     return 1 - (1.f*m)/(32*n);
 }
@@ -243,15 +251,13 @@ int main(int argc, char **argv) {
                  if (t == kNtrain && nnhandler.allSame(4*nneighb)) break;
                  float d2 = (M[0]-m0)*(M[0]-m0)+(M[1]-m1)*(M[1]-m1)+(M[2]-m2)*(M[2]-m2);
                  if (d2 < 75) {
-                     float bestccpx = 1e30; int bestkx = 0;
-                     for (int kx=-smax; kx<=smax; ++kx) {
-                         auto cc = computeProjectionCC(kNx,Pa,projBx[kx+smax].data(),Sp[0],Sp[1],auxPx[2*(kx+smax)],auxPx[2*(kx+smax)+1]);
-                         if (cc < bestccpx) { bestccpx = cc; bestkx = kx; }
-                     }
-                     float bestccpy = 1e30; int bestky = 0;
-                     for (int ky=-smax; ky<=smax; ++ky) {
-                         auto cc = computeProjectionCC(kNy,Pa+kNx,projBy[ky+smax].data(),Sp[2],Sp[3],auxPy[2*(ky+smax)],auxPy[2*(ky+smax)+1]);
-                         if (cc < bestccpy) { bestccpy = cc; bestky = ky; }
+                     float bestccpx = std::numeric_limits<float>::max(); int bestkx = 0;
+                     float bestccpy = std::numeric_limits<float>::max(); int bestky = 0;
+                     for (int ks=-smax; ks<=smax; ++ks) {
+                         auto ccx = computeProjectionCC(kNx,Pa,    projBx[ks+smax].data(),Sp[0],Sp[1],auxPx[2*(ks+smax)],auxPx[2*(ks+smax)+1]);
+                         auto ccy = computeProjectionCC(kNy,Pa+kNx,projBy[ks+smax].data(),Sp[2],Sp[3],auxPy[2*(ks+smax)],auxPy[2*(ks+smax)+1]);
+                         if (ccx < bestccpx) { bestccpx = ccx; bestkx = ks; }
+                         if (ccy < bestccpy) { bestccpy = ccy; bestky = ks; }
                      }
                      auto ccp = bestccpx + bestccpy;
                      if (ccp < thresh) {

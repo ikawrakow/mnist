@@ -14,7 +14,7 @@ public:
             return;
         }
         if (a.first >= data_.back().first) return;
-        auto i = findIndex(a);
+        auto i = findIndex(a.first);
         for (int k=nmax_-1; k>i; --k) data_[k] = data_[k-1];
         data_[i] = a;
     }
@@ -53,14 +53,20 @@ private:
     std::vector<std::pair<float,int>> data_;
     int nmax_;
     int nhave_;
-    inline int findIndex(const std::pair<float,int> &x) const {
-        if (x.first <= data_.front().first) return 0;
-        int ml = 0, mu = nmax_-1;
-        while (mu-ml > 1) {
-            int mav = (ml+mu)/2;
-            if (x.first < data_[mav].first) mu = mav; else ml = mav;
+    inline int findIndex(float x) const {
+        if (x <= data_.front().first) return 0;
+        auto bounds = std::make_pair(0, nmax_-1);
+        while (bounds.second - bounds.first > 1) {
+            int mav = (bounds.second + bounds.first)/2;
+            bounds = x < data_[mav].first ? std::make_pair(bounds.first, mav) : std::make_pair(mav, bounds.second);
         }
-        return mu;
+        return bounds.second;
+        //int ml = 0, mu = nmax_-1;
+        //while (mu-ml > 1) {
+        //    int mav = (ml+mu)/2;
+        //    if (x < data_[mav].first) mu = mav; else ml = mav;
+        //}
+        //return mu;
     }
 };
 
