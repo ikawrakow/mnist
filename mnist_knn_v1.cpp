@@ -86,6 +86,17 @@ struct Image {
         }
         if (bit > 0) bits[l] = u;
     }
+    inline float distance(const Image& other) const {
+        int non = 0;
+        for (int i = 0; i < kNu32; ++i) non += popcount(bits[i] & other.bits[i]);
+        float ccb = 1 - 1.f*non/kNbits;
+        int sumab = 0;
+        for (int j = 0; j < kSize; ++j) sumab += int(data[j])*int(other.data[j]);
+        float norm = kSize;
+        float denom = (norm*sum2 - sum*sum)*(norm*other.sum2 - other.sum*other.sum);
+        float cc = denom > 0 ? 1.f - (norm*sumab - sum*other.sum)/sqrt(denom) : 2.f;
+        return 0.125f*cc + ccb;
+    }
 };
 
 static std::vector<Image> prepareTrainingData(int nimage, const uint8_t * allData) {
@@ -93,21 +104,6 @@ static std::vector<Image> prepareTrainingData(int nimage, const uint8_t * allDat
     result.reserve(nimage);
     for (int i = 0; i < nimage; ++i) result.emplace_back(allData + i*kSize);
     return result;
-}
-
-static inline float computeCC(const Image& a, const Image& b) {
-    int non = 0;
-    for (int i = 0; i < kNu32; ++i) non += popcount(a.bits[i] & b.bits[i]);
-    float ccb = 1 - 1.f*non/kNbits;
-    int sumab = 0;
-    for (int j = 0; j < kSize; ++j) sumab += int(a.data[j])*int(b.data[j]);
-    float norm = kSize;
-    float denom = (norm*a.sum2 - a.sum*a.sum)*(norm*b.sum2 - b.sum*b.sum);
-    if (denom <= 0) {
-        printf("Oops: denom = %g\n", denom); exit(1);
-    }
-    float cc = denom > 0 ? 1.f - (norm*sumab - a.sum*b.sum)/sqrt(denom) : 2.f;
-    return 0.125f*cc + ccb;
 }
 
 int main(int argc, char **argv) {
@@ -143,7 +139,7 @@ int main(int argc, char **argv) {
              nnhandler.reset();
              Image b(B);
              for (int j = 0; j < int(train.size()); ++j) {
-                 auto cc = computeCC(b, train[j]);
+                 auto cc = b.distance(train[j]);
                  nnhandler.add({cc, labels[j]});
              }
              for (int n=1; n<=4*nneighb; ++n) predicted[n-1][i] = nnhandler.predict(n);
