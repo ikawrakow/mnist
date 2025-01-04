@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <thread>
 #include <atomic>
+#include <chrono>
 
 constexpr int kMargin = 6;
 constexpr int kNpoints = 4;
@@ -147,6 +148,9 @@ int main(int argc, char **argv) {
          }
     };
 
+    printf("Predicting %d test images...", kNtest);
+    fflush(stdout);
+    auto tim1 = std::chrono::steady_clock::now();
     std::atomic<int> counter(0);
     auto compute = [&counter, &processChunk]() {
         constexpr int chunk = 64;
@@ -161,6 +165,9 @@ int main(int argc, char **argv) {
     for (auto& w : workers) w = std::thread(compute);
     compute();
     for (auto& w : workers) w.join();
+    auto tim2 = std::chrono::steady_clock::now();
+    auto time = 1e-3*std::chrono::duration_cast<std::chrono::microseconds>(tim2-tim1).count();
+    printf("done in %g ms -> %g ms per image\n\n", time, time/kNtest);
 
     printf("neighbors | error (%c)\n", '%');
     printf("----------|-----------\n");
