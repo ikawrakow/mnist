@@ -8,6 +8,7 @@ constexpr uint32_t kNtest  = 10000;
 constexpr int kNx = 28;
 constexpr int kNy = 28;
 constexpr int kSize = kNx*kNy;
+constexpr int kNlabels = 10;
 
 std::vector<uint8_t> getTraningLabels();
 

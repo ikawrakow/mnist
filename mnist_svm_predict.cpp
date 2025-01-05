@@ -5,13 +5,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
-#include <memory>
 #include <algorithm>
 #include <thread>
 #include <atomic>
 #include <chrono>
-#include <mutex>
-#include <array>
 #include <fstream>
 
 static bool loadModel(const char* fname, std::vector<Pattern>& patterns, std::vector<std::vector<double>>& allP) {
@@ -30,7 +27,7 @@ static bool loadModel(const char* fname, std::vector<Pattern>& patterns, std::ve
         in.read((char *)&p.margin_,sizeof(p.margin_));
         in.read((char *)&p.down_,sizeof(p.down_));
     }
-    if ((int)allP.size() != 10) allP.resize(10);
+    if ((int)allP.size() != kNlabels) allP.resize(kNlabels);
     int npoint;
     in.read((char *)&npoint,sizeof(int));
     for (auto & p : allP) {
@@ -59,7 +56,7 @@ int main(int argc, char **argv) {
 
     printf("\n============================== Dataset %s\n",argv[1]);
     std::vector<Pattern> patterns;
-    std::vector<std::vector<double>> allP(10);
+    std::vector<std::vector<double>> allP(kNlabels);
     if (!loadModel(argv[1],patterns,allP)) return 1;
 
     auto tim1 = std::chrono::steady_clock::now();
@@ -73,20 +70,20 @@ int main(int argc, char **argv) {
     int npoint = testImages.size()/testLabels.size();
     printf("# %d points per image\n",npoint);
     std::atomic<int> counter(0);
-    std::vector<float> V(10*kNtest);
+    std::vector<float> V(kNlabels*kNtest);
     auto predict = [&counter, &allP, &testImages, &V, npoint]() {
         int chunk = 64;
         while (true) {
             int first = counter.fetch_add(chunk);
             if (first >= kNtest) break;
             int n = first + chunk <= kNtest ? chunk : kNtest - first;
-            for (int l=0; l<10; ++l) {
+            for (int l=0; l<kNlabels; ++l) {
                 auto B = testImages.data() + first*npoint;
-                auto v = V.data() + 10*first + l;
+                auto v = V.data() + kNlabels*first + l;
                 auto& p = allP[l];
                 for (int i=0; i<n; ++i) {
                     double s = 0; for(int j=0; j<npoint; ++j) s += p[j]*B[j];
-                    *v = s; v += 10; B += npoint;
+                    *v = s; v += kNlabels; B += npoint;
                 }
             }
         }
@@ -95,27 +92,27 @@ int main(int argc, char **argv) {
     for (auto& w : workers) w.join();
 
     std::vector<int> countOK(kNtest,0);
-    std::vector<std::pair<float,int>> X(10);
+    std::vector<std::pair<float,int>> X(kNlabels);
 
     std::vector<int> countGood(confLevels.size(),0), count(confLevels.size(),0);
     int ncheck = 5;
     std::vector<int> Ngood(ncheck,0);
     for (int i=0; i<kNtest; ++i) {
-        for (int l=0; l<10; ++l) {
-            X[l] = {V[10*i+l],l};
+        for (int l=0; l<kNlabels; ++l) {
+            X[l] = {V[kNlabels*i+l],l};
         }
         std::sort(X.begin(),X.end());
-        if (X[9].second == testLabels[i]) ++countOK[i];
-        auto delta = X[9].first - X[8].first;
+        if (X[kNlabels-1].second == testLabels[i]) ++countOK[i];
+        auto delta = X[kNlabels-1].first - X[kNlabels-2].first;
         for(int k=0; k<(int)confLevels.size(); ++k) {
             if (delta > confLevels[k]) {
                 ++count[k];
-                if (X[9].second == testLabels[i]) ++countGood[k];
+                if (X[kNlabels].second == testLabels[i]) ++countGood[k];
             }
         }
-        for(int k=9; k>=0; --k) {
+        for(int k=kNlabels-1; k>=0; --k) {
             if (X[k].second == testLabels[i]) {
-                int n = 9 - k;
+                int n = kNlabels - 1 - k;
                 for (int j=n; j<ncheck; ++j) ++Ngood[j];
                 break;
             }
