@@ -169,3 +169,101 @@ void addElasticDeformationsSameT(std::vector<uint8_t>& images, std::vector<uint8
     addElasticDeformationsSameT(images, labels, nAdd, 6., 38., 0, nullptr);
 }
 
+void addAffineTransformations(int Nx, int Ny, std::vector<uint8_t> &images, std::vector<uint8_t> &labels, int nAffine,
+        double phiRangle, double shearRange, double zoomRange, double shiftXrange, double shiftYrange,
+        int rng_seq, bool recenter) {
+    auto tim1 = std::chrono::steady_clock::now();
+    std::mt19937 rng(5489+rng_seq);
+    auto rndm = [&rng] () {
+        constexpr double rnorm = 1./4294967296;
+        return rnorm*rng();
+    };
+    int nimage = labels.size();
+    uint64_t nnew = (nAffine+1)*nimage;
+    uint64_t ntot = nnew*Nx*Ny;
+    printf("Adding %d affine transformations with phiRange=%g, shearRange=%g, scaleRange=%g. New number of images is %g\n",
+            nAffine,phiRangle,shearRange,zoomRange,1.*nnew);
+    phiRangle *= M_PI/180;
+    shearRange *= M_PI/180;
+    std::vector<float> transforms(6*nimage*nAffine);
+    auto T = transforms.data();
+    for(int i=0; i<nimage*nAffine; ++i) {
+        double phi = phiRangle*(2*rndm()-1);
+        double cphi = cos(phi), sphi = sin(phi);
+        double alpha = shearRange*(2*rndm()-1);
+        double calpha = cos(alpha), salpha = sin(alpha);
+        double Sx = 1 + zoomRange*(2*rndm()-1);
+        double Sy = 1 + zoomRange*(2*rndm()-1);
+        T[0] = Sx*(cphi + salpha*sphi);
+        T[1] = Sx*(salpha*cphi - sphi);
+        T[2] = Sy*calpha*sphi;
+        T[3] = Sy*calpha*cphi;
+        T[4] = shiftXrange*Nx*(2*rndm()-1);
+        T[5] = shiftYrange*Ny*(2*rndm()-1);
+        T += 6;
+    }
+    labels.resize(nnew);
+    images.resize(ntot);
+    std::atomic<int> counter(0);
+    auto compute = [&counter,&images,&labels,&transforms,nimage,nAffine,Nx,Ny,recenter]() {
+        int chunk = 64;
+        int cx = Nx/2, cy = Ny/2;
+        std::vector<uint8_t> aux(Nx*Ny);
+        while(1) {
+            int first = counter.fetch_add(chunk);
+            if( first >= nimage ) break;
+            int last = first + chunk; if( last > nimage ) last = nimage;
+            for(int i=first; i<last; ++i) {
+                auto A = &images[i*Nx*Ny];
+                uint64_t start1 = nimage + i*nAffine;
+                uint64_t start2 = start1*Nx*Ny;
+                uint8_t *B = &images[start2], *L = &labels[start1];
+                auto T = &transforms[6*i*nAffine];
+                for(int it=0; it<nAffine; ++it) {
+                    float tx = -T[0]*cx - T[1]*cy + T[4];
+                    float ty = -T[2]*cx - T[3]*cy + T[5];
+                    int s = 0, sx = 0, sy = 0;
+                    for(int y=0; y<Ny; ++y) for(int x=0; x<Nx; ++x) {
+                        float x1 = T[0]*x + T[1]*y + tx + cx;
+                        float y1 = T[2]*x + T[3]*y + ty + cy;
+                        if( x1 >= 0 && x1 < Nx && y1 >= 0 && y1 < Ny ) {
+                            int ix1 = (int)x1, iy1 = (int)y1;
+                            x1 -= ix1; y1 -= iy1;
+                            int ix2 = ix1 + 1; float x2 = 1 - x1; if( ix2 >= Nx ) { ix2 = Nx-1; x1 = 1; x2 = 0; }
+                            int iy2 = iy1 + 1; float y2 = 1 - y1; if( iy2 >= Ny ) { iy2 = Ny-1; y1 = 1; y2 = 0; }
+                            int b = toNearestInt(y1*(x1*A[ix2+iy2*Nx] + x2*A[ix1+iy2*Nx])+y2*(x1*A[ix2+iy1*Nx] + x2*A[ix1+iy1*Nx]));
+                            B[x+y*Nx] = b;
+                            sx += x*b; sy += y*b; s += b;
+                        }
+                        else B[x+y*Nx] = 0;
+                    }
+                    if( recenter ) {
+                        sx = toNearestInt((1.f*sx)/s) - cx;
+                        sy = toNearestInt((1.f*sy)/s) - cy;
+                        if( sx || sy ) {
+                            for(int y=0; y<Ny; ++y) {
+                                int y1 = y + sy;
+                                for(int x=0; x<Nx; ++x) {
+                                    int x1 = x + sx;
+                                    aux[x+y*Nx] = x1 >= 0 && x1 < Nx && y1 >= 0 && y1 < Ny ? B[x1+y1*kNx] : 0;
+                                }
+                            }
+                            for(int j=0; j<Nx*Ny; ++j) B[j] = aux[j];
+                        }
+                    }
+                    B += Nx*Ny; *L++ = labels[i];
+                    T += 6;
+                }
+                A += Nx*Ny;
+            }
+        }
+    };
+    int nthread = std::thread::hardware_concurrency();
+    std::vector<std::thread> workers(nthread);
+    for(auto& w : workers) w = std::thread(compute);
+    for(auto& w : workers) w.join();
+    auto tim2 = std::chrono::steady_clock::now();
+    auto time = 1e-3*std::chrono::duration_cast<std::chrono::milliseconds>(tim2-tim1).count();
+    printf("%s: finished in %g seconds\n",__func__,time);
+}
+

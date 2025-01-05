@@ -9,6 +9,10 @@ void addElasticDeformationsSameT(std::vector<uint8_t>& images, std::vector<uint8
 
 void addElasticDeformationsSameT(std::vector<uint8_t>& images, std::vector<uint8_t>& labels, int nAdd);
 
+void addAffineTransformations(int Nx, int Ny, std::vector<uint8_t>& images, std::vector<uint8_t>& labels, int nAffine,
+        double phiRangle, double shearRange, double zoomRange, double shiftXrange, double shiftYrange,
+        int rng_seq, bool recenter = false);
+
 static inline int toNearestInt(float fval) noexcept {
     assert(fval <= 4194303.f);
     constexpr float kSnapper=3<<22;
