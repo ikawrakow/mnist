@@ -1,5 +1,6 @@
 #include "getImages.h"
 #include "imageUtils.h"
+#include "svmPattern.h"
 #include "bfgs.h"
 
 #include <cstdio>
@@ -117,251 +118,6 @@ double computeVfast(const std::vector<uint8_t> &dImage, std::vector<double> &dv,
     return std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
 }
 
-struct Pattern {
-    std::vector<int> points_;
-    int margin_;
-    int down_;
-};
-
-void applyPattern(int Nx, int Ny, const Pattern &pattern, const uint8_t *A, uint8_t *R, uint8_t *aux, int *aux1) {
-    int type = 0, margin = pattern.margin_;
-    if( margin < 0 ) { type = 1; margin = -margin; }
-    int Nx1 = Nx - 2*margin, Ny1 = Ny - 2*margin;
-    int Nx2 = Nx1, Ny2 = Ny1;
-    if( pattern.down_ ) {
-        if( pattern.down_ > 0 ) {
-            Nx2 = (Nx2 - 2 + pattern.down_)/pattern.down_; Ny2 = (Ny2 - 2 + pattern.down_)/pattern.down_;
-        }
-        else { Nx2 = Nx1 + Ny1; Ny2 = 1; }
-    }
-    int np = pattern.points_.size()/2;
-    for(int ip=0; ip<np; ++ip) {
-        auto j1 = pattern.points_[2*ip], j2 = pattern.points_[2*ip+1];
-        auto B = pattern.down_ ? aux : R;
-        int j = 0;
-        if( type == 0 ) {
-            for(int y=margin; y<Ny-margin; ++y) for(int x=margin; x<Nx-margin; ++x) {
-                int jj = x + y*Nx;
-                int a1 = A[jj+j1], a2 = A[jj+j2];
-                B[j++] = a1 > a2 ? a1 - a2 : 0;
-            }
-        }
-        else {
-            for(int y=margin; y<Ny-margin; ++y) for(int x=margin; x<Nx-margin; ++x) {
-                int jj = x + y*Nx;
-                int a1 = A[jj], a2 = A[jj+j1], a3 = A[jj+j2]; a2 = (a2 + a3)/2;
-                B[j++] = a1 > a2 ? a1 - a2 : 0;
-            }
-        }
-        if( pattern.down_ ) {
-            if( pattern.down_ > 0 ) {
-                j = 0;
-                for(int y=0; y<Ny1-1; y+=pattern.down_) for(int x=0; x<Nx1-1; x+=pattern.down_) {
-                    int s = 0; for(int ky=y; ky<y+2; ++ky) for(int kx=x; kx<x+2; ++kx) s += aux[kx+ky*Nx1];
-                    R[j++] = s >> 2;
-                }
-            }
-            else {
-                for(j=0; j<Nx2*Ny2; ++j) aux1[j] = 0;
-                for(int y=0; y<Ny1; ++y) for(int x=0; x<Nx1; ++x) {
-                    int a = aux[x+y*Nx1];
-                    aux1[x] += a; aux1[Nx1+y] += a;
-                }
-                for(j=0; j<Nx1; ++j) R[j] = toNearestInt((1.f*aux1[j])/Ny1);
-                for(j=Nx1; j<Nx1+Ny1; ++j) R[j] = toNearestInt((1.f*aux1[j])/Nx1);
-            }
-        }
-        R += Nx2*Ny2;
-    }
-}
-
-std::vector<uint8_t> applyPattern(int Nx, int Ny, const std::vector<uint8_t> &images, const Pattern &pattern,
-        int &Nxf, int &Nyf) {
-    int64_t nimage = images.size()/(Nx*Ny);
-    int np = pattern.points_.size()/2;
-    int margin = pattern.margin_; if( margin < 0 ) margin = -margin;
-    int Nx1 = Nx - 2*margin, Ny1 = Ny - 2*margin;
-    int Nx2 = Nx1, Ny2 = Ny1;
-    if( pattern.down_ ) {
-        if( pattern.down_ > 0 ) {
-            Nx2 = (Nx2 - 2 + pattern.down_)/pattern.down_; Ny2 = (Ny2 - 2 + pattern.down_)/pattern.down_;
-        }
-        else { Nx2 = Nx1 + Ny1; Ny2 = 1; }
-    }
-    std::vector<uint8_t> result(Nx2*Ny2*np*nimage);
-    printf("%s: nimage=%d np=%d Nx=%d Ny=%d Nx1=%d Ny1=%d Nx2=%d Ny2=%d\n",__func__,(int)nimage,np,Nx,Ny,Nx1,Ny1,Nx2,Ny2);
-    fflush(stdout);
-    std::atomic<int64_t> counter(0); int chunk = 64;
-    auto compute = [&counter, &images, &pattern, &result, Nx, Ny, Nx1, Ny1, Nx2, Ny2, np, nimage, chunk]() {
-        std::vector<uint8_t> aux(Nx1*Ny1);
-        std::vector<int> aux1(Nx1*Ny1);
-        while(1) {
-            int64_t first = counter.fetch_add(chunk);
-            if( first >= nimage ) break;
-            int n = first + chunk < nimage ? chunk : nimage - first;
-            auto A = images.data() + first * Nx*Ny;
-            auto R = result.data() + first * Nx2*Ny2*np;
-            for(int i=0; i<n; ++i) {
-                applyPattern(Nx,Ny,pattern,A,R,aux.data(),aux1.data());
-                A += Nx*Ny; R += Nx2*Ny2*np;
-            }
-        }
-    };
-    int nthread = std::thread::hardware_concurrency();
-    std::vector<std::thread> workers(nthread-1);
-    for(auto & w : workers) w = std::thread(compute);
-    compute();
-    for(auto & w : workers) w.join();
-    Nxf = Nx2; Nyf = Ny2;
-    return result;
-}
-
-// 12,000 points. 0.9945 with elastic, lambda = 20
-std::vector<Pattern> getPatternsV0() {
-    std::vector<Pattern> result;
-    Pattern p1;
-    p1.margin_ = 2; p1.down_ = 2;
-    p1.points_ = {0,1+kNx,0,1-kNx,0,-1+kNx,0,-1-kNx,0,-1,0,1,0,kNx,0,-kNx,0,2,0,-2,0,2*kNx,0,-2*kNx,
-                  0,2+2*kNx,0,2-2*kNx,0,-2+2*kNx,0,-2-2*kNx,
-                  0,1+2*kNx,0,1-2*kNx,0,-1+2*kNx,0,-1-2*kNx,
-                  0,2+1*kNx,0,2-1*kNx,0,-2+1*kNx,0,-2-1*kNx};
-    Pattern p2;
-    int Nx1 = (kNx - 2*p1.margin_)/2;
-    p2.margin_ = 1; p2.down_ = 2;
-    p2.points_ = {1,-1,Nx1,-Nx1,1+Nx1,-1-Nx1,1-Nx1,-1+Nx1,1,-1+Nx1,1,-1-Nx1,-1,1+Nx1,-1,1-Nx1,Nx1,-Nx1+1,Nx1,-Nx1-1,-Nx1,Nx1+1,-Nx1,Nx1-1,
-                  0,1, 0,-1, 0,Nx1, 0,-Nx1, 0,1+Nx1, 0,1-Nx1, 0,-1+Nx1, 0,-1-Nx1};
-    result.emplace_back(std::move(p1));
-    result.emplace_back(std::move(p2));
-    return result;
-}
-
-// 16,000 points. 0.9952 with new affine and 9 extra, lambda = 20.
-std::vector<Pattern> getPatternsV0a() {
-    std::vector<Pattern> result;
-    Pattern p1;
-    p1.margin_ = 2; p1.down_ = 2;
-    p1.points_ = {0,1+kNx,0,1-kNx,0,-1+kNx,0,-1-kNx,0,-1,0,1,0,kNx,0,-kNx,
-                  kNx,1, 1,-kNx, -kNx,-1, -1,kNx,
-                  -1-kNx,1-kNx, 1-kNx,1+kNx, 1+kNx,-1+kNx, -1+kNx,-1-kNx,
-                  0,2,0,-2,0,2*kNx,0,-2*kNx,
-                  0,2+2*kNx,0,2-2*kNx,0,-2+2*kNx,0,-2-2*kNx,
-                  0,1+2*kNx,0,1-2*kNx,0,-1+2*kNx,0,-1-2*kNx,
-                  0,2+1*kNx,0,2-1*kNx,0,-2+1*kNx,0,-2-1*kNx};
-    Pattern p2;
-    int Nx1 = (kNx - 2*p1.margin_)/2;
-    p2.margin_ = 1; p2.down_ = 2;
-    p2.points_ = {1,-1,Nx1,-Nx1,1+Nx1,-1-Nx1,1-Nx1,-1+Nx1,1,-1+Nx1,1,-1-Nx1,-1,1+Nx1,-1,1-Nx1,Nx1,-Nx1+1,Nx1,-Nx1-1,-Nx1,Nx1+1,-Nx1,Nx1-1,
-                  0,1, 0,-1, 0,Nx1, 0,-Nx1, 0,1+Nx1, 0,1-Nx1, 0,-1+Nx1, 0,-1-Nx1};
-    result.emplace_back(std::move(p1));
-    result.emplace_back(std::move(p2));
-    return result;
-}
-
-// 57,600 points. Achieves 0.9964!!! trained with 29 extra new affine, lambda = 50, 600 iterations.
-std::vector<Pattern> getPatternsV1a() {
-    std::vector<Pattern> result;
-    Pattern p1;
-    p1.margin_ = 2; p1.down_ = 2;
-    p1.points_ = {0,1+kNx, 0,1-kNx, 0,-1+kNx, 0,-1-kNx, 0,-1, 0,1, 0,kNx, 0,-kNx, //8
-                  kNx,1, 1,-kNx, -kNx,-1, -1,kNx,                                 //4
-                  -1-kNx,1-kNx, 1-kNx,1+kNx, 1+kNx,-1+kNx, -1+kNx,-1-kNx,         //4
-                  0,2, 0,-2, 0,2*kNx, 0,-2*kNx,                                   //4
-                  0,2+2*kNx, 0,2-2*kNx, 0,-2+2*kNx, 0,-2-2*kNx,                   //4
-                  0,1+2*kNx, 0,1-2*kNx, 0,-1+2*kNx, 0,-1-2*kNx,                   //4
-                  0,2+1*kNx, 0,2-1*kNx, 0,-2+1*kNx, 0,-2-1*kNx};                  //4
-    Pattern p2;
-    int Nx1 = (kNx - 2*p1.margin_)/2;
-    p2.margin_ = 1; p2.down_ = 2;
-    p2.points_ = {1,-1, Nx1,-Nx1, 1+Nx1,-1-Nx1, 1-Nx1,-1+Nx1,
-                  1,-1+Nx1,1,-1-Nx1, -1,1+Nx1,-1,1-Nx1,
-                  Nx1,-Nx1+1, Nx1,-Nx1-1, -Nx1,Nx1+1,-Nx1,Nx1-1,
-                  0,1, 0,-1, 0,Nx1, 0,-Nx1, 0,1+Nx1, 0,1-Nx1, 0,-1+Nx1, 0,-1-Nx1};
-    int Nx2 = (Nx1 - 2*p2.margin_)/2;
-    Pattern p3; p3.margin_ = 1; p3.down_ = 0;
-    p3.points_ = {0,1+Nx2,  0,1-Nx2,  0,-1+Nx2,  0,-1-Nx2,  1,-1,  Nx2,-Nx2,
-                  Nx2,1,  1,-Nx2,  -Nx2,-1, -1,Nx2};
-    result.emplace_back(std::move(p1));
-    result.emplace_back(std::move(p2));
-    result.emplace_back(std::move(p3));
-    return result;
-}
-
-// 30720 points, 9963 with lambda=10, 29 extra new affine
-std::vector<Pattern> getPatternsC() {
-    std::vector<Pattern> result;
-    int Nx = kNx;
-    Pattern p1; p1.margin_ = 1; p1.down_ = 2;
-    p1.points_ = {0,1+Nx, 0,1-Nx, 0,-1+Nx, 0,-1-Nx, 1,-1, Nx,-Nx,
-                  -1-Nx,1-Nx, 1-Nx,1+Nx, 1+Nx,-1+Nx, -1+Nx,-1-Nx,
-                  1+Nx,-1-Nx, 1-Nx,-1+Nx,
-                  -1,1+Nx, -1,1-Nx, -Nx,-1+Nx, -Nx,1+Nx};
-
-    Nx = (Nx - 2*p1.margin_)/2;
-    Pattern p2; p2.margin_ = 1; p2.down_ = 1;
-    p2.points_ = {0,1+Nx, 0,1-Nx, 0,-1+Nx, 0,-1-Nx, 1,-1, Nx,-Nx,
-                  -1-Nx,1-Nx, 1-Nx,1+Nx, 1+Nx,-1+Nx, -1+Nx,-1-Nx,
-                  1+Nx,-1-Nx, 1-Nx,-1+Nx};
-
-    Nx = Nx - 2*p2.margin_ - 1;
-    Pattern p3; p3.margin_ = 1; p3.down_ = 2;
-    p3.points_ = {0,1+Nx, 0,1-Nx, 0,-1+Nx, 0,-1-Nx, 1,-1, Nx,-Nx,
-                  -1-Nx,1-Nx, 1-Nx,1+Nx, 1+Nx,-1+Nx, -1+Nx,-1-Nx,
-                  1+Nx,-1-Nx, 1-Nx,-1+Nx,
-                  -1,1+Nx, -1,1-Nx, -Nx,-1+Nx, -Nx,1+Nx};
-
-    Nx = (Nx - 2*p3.margin_)/2;
-    Pattern p4; p4.margin_ = 1; p4.down_ = 2;
-    p4.points_ = {0,1+Nx, 0,1-Nx, 0,-1+Nx, 0,-1-Nx, 1,-1, Nx,-Nx,
-                  -1-Nx,1-Nx, 1-Nx,1+Nx, 1+Nx,-1+Nx, -1+Nx,-1-Nx};
-
-    result.emplace_back(std::move(p1));
-    result.emplace_back(std::move(p2));
-    result.emplace_back(std::move(p3));
-    result.emplace_back(std::move(p4));
-
-    return result;
-}
-
-// same as V1a, but last level is downsampled with -1
-// 38400 points, 9963 with z5 using lambda = 20 and 29 new affine
-std::vector<Pattern> getPatternsV1c() {
-    std::vector<Pattern> result;
-    Pattern p1;
-    p1.margin_ = 2; p1.down_ = 2;
-    p1.points_ = {0,1+kNx, 0,1-kNx, 0,-1+kNx, 0,-1-kNx, 0,-1, 0,1, 0,kNx, 0,-kNx, //8
-                  kNx,1, 1,-kNx, -kNx,-1, -1,kNx,                                 //4
-                  -1-kNx,1-kNx, 1-kNx,1+kNx, 1+kNx,-1+kNx, -1+kNx,-1-kNx,         //4
-                  0,2, 0,-2, 0,2*kNx, 0,-2*kNx,                                   //4
-                  0,2+2*kNx, 0,2-2*kNx, 0,-2+2*kNx, 0,-2-2*kNx,                   //4
-                  0,1+2*kNx, 0,1-2*kNx, 0,-1+2*kNx, 0,-1-2*kNx,                   //4
-                  0,2+1*kNx, 0,2-1*kNx, 0,-2+1*kNx, 0,-2-1*kNx};                  //4
-    Pattern p2;
-    int Nx1 = (kNx - 2*p1.margin_)/2;
-    p2.margin_ = 1; p2.down_ = 2;
-    p2.points_ = {1,-1, Nx1,-Nx1, 1+Nx1,-1-Nx1, 1-Nx1,-1+Nx1,
-                  1,-1+Nx1,1,-1-Nx1, -1,1+Nx1,-1,1-Nx1,
-                  Nx1,-Nx1+1, Nx1,-Nx1-1, -Nx1,Nx1+1,-Nx1,Nx1-1,
-                  0,1, 0,-1, 0,Nx1, 0,-Nx1, 0,1+Nx1, 0,1-Nx1, 0,-1+Nx1, 0,-1-Nx1};
-    int Nx2 = (Nx1 - 2*p2.margin_)/2;
-    Pattern p3; p3.margin_ = 1; p3.down_ = -1;
-    p3.points_ = {0,1+Nx2,  0,1-Nx2,  0,-1+Nx2,  0,-1-Nx2,  1,-1,  Nx2,-Nx2,
-                  Nx2,1,  1,-Nx2,  -Nx2,-1, -1,Nx2};
-    result.emplace_back(std::move(p1));
-    result.emplace_back(std::move(p2));
-    result.emplace_back(std::move(p3));
-    return result;
-}
-
-std::vector<Pattern> getPatterns() {
-
-    //return getPatternsC();
-    //return getPatternsV1c();
-    //return getPatternsV1a();
-    return getPatternsV0();
-    //return getPatternsV0a();
-
-}
-
 void writeResults(const char *ofile, int npoint, const std::vector<Pattern> &patterns, const std::vector<double> &P) {
     std::ofstream out(ofile,std::ios::binary);
     int npattern = patterns.size();
@@ -385,10 +141,9 @@ int main(int argc, char **argv) {
     int    niter  = argc > iarg ? atoi(argv[iarg++]) : 200;
     int    nadd   = argc > iarg ? atoi(argv[iarg++]) : 0;
     double lambda = argc > iarg ? atof(argv[iarg++]) : 10.;
-    float  sigma  = argc > iarg ? atof(argv[iarg++]) : 6;
-    float  alpha  = argc > iarg ? atof(argv[iarg++]) : 38;
     int    nhist  = argc > iarg ? atoi(argv[iarg++]) : 10;
     int    rseq   = argc > iarg ? atoi(argv[iarg++]) : 0;
+    int    type   = argc > iarg ? atoi(argv[iarg++]) : 0;
     auto   ofile  = argc > iarg ? argv[iarg++] : "test.dat";
 
     auto labels = getTraningLabels();
@@ -426,12 +181,12 @@ int main(int argc, char **argv) {
     int nthread = std::thread::hardware_concurrency();
     std::vector<std::thread> workers(nthread);
 
-    auto patterns = getPatterns();
+    auto patterns = Pattern::getPatterns(type);
     int Nx = kNx, Ny = kNy;
-    for(const auto & p : patterns) {
+    for(const auto& p : patterns) {
         int Nx1, Ny1;
-        images = applyPattern(Nx,Ny,images,p,Nx1,Ny1);
-        testImages = applyPattern(Nx,Ny,testImages,p,Nx1,Ny1);
+        images = Pattern::apply(Nx,Ny,images,p,Nx1,Ny1);
+        testImages = Pattern::apply(Nx,Ny,testImages,p,Nx1,Ny1);
         Nx = Nx1; Ny = Ny1;
     }
     int npoint = images.size()/labels.size();
@@ -451,7 +206,9 @@ int main(int argc, char **argv) {
 
     std::vector<double> Fvalues(niter);
     std::vector<BFGSHistory> bfgs;
-    for(int l=0; l<10; ++l) bfgs.emplace_back(BFGSHistory(npoint,nhist));
+    bfgs.reserve(10);
+    //for (int l=0; l<10; ++l) bfgs.emplace_back(BFGSHistory(npoint,nhist));
+    for (int l=0; l<10; ++l) bfgs.emplace_back(npoint,nhist);
 
     auto computeF = [ntrain,&sump2,lambda,norm,&V,&dV,&labels](int l, double s1, double s2, double t) -> double {
         double Fn = lambda*(sump2[l] + 2*t*s1 + t*t*s2);
@@ -473,33 +230,33 @@ int main(int argc, char **argv) {
 
     auto tStart = std::chrono::steady_clock::now();
 
-    for(int iter=0; iter<niter; ++iter) {
+    for (int iter=0; iter<niter; ++iter) {
 
         auto p = P.data(); auto dp = dP.data();
-        for(int l=0; l<10; ++l) {
+        for (int l=0; l<10; ++l) {
             double s = 0;
-            for(int j=0; j<npoint; ++j) { dp[j] = 2*lambda*p[j]; s += p[j]*p[j]; }
+            for (int j=0; j<npoint; ++j) { dp[j] = 2*lambda*p[j]; s += p[j]*p[j]; }
             sump2[l] = s;
             p += npoint; dp += npoint;
         }
         computeFdF(norm,labels,V,dfdv,d2fdv2,F);
         totPtime += computeP(images,dfdv,dP,npoint,ntrain,chunk,workers);
-        for(int l=0; l<10; ++l) bfgs[l].setSearchDirection(F[l],P.data()+npoint*l,dP.data()+npoint*l,du.data()+npoint*l);
+        for (int l=0; l<10; ++l) bfgs[l].setSearchDirection(F[l],P.data()+npoint*l,dP.data()+npoint*l,du.data()+npoint*l);
         totVtime += computeVfast(images,dV,du,ui,npoint,ntrain,workers);
         double totF = 0, totP2 = 0;
         bool allConverged = true;
         p = P.data(); auto dU = du.data();
-        for(int l=0; l<10; ++l) {
+        for (int l=0; l<10; ++l) {
             double F1 = F[l] + lambda*sump2[l];
             double sum1 = 0, sum2 = 0;
-            for(int i=0; i<ntrain; ++i) { sum1 -= dV[10*i+l]*dfdv[10*i+l]; sum2 += dV[10*i+l]*dV[10*i+l]*d2fdv2[10*i+l]; }
+            for (int i=0; i<ntrain; ++i) { sum1 -= dV[10*i+l]*dfdv[10*i+l]; sum2 += dV[10*i+l]*dV[10*i+l]*d2fdv2[10*i+l]; }
             sum1 *= 0.5; sum2 *= 0.5;
             double s1 = 0, s2 = 0;
-            if( lambda > 0 ) {
-                for(int j=0; j<npoint; ++j) { s1 += p[j]*dU[j]; s2 += dU[j]*dU[j]; }
+            if (lambda > 0) {
+                for (int j=0; j<npoint; ++j) { s1 += p[j]*dU[j]; s2 += dU[j]*dU[j]; }
                 sum1 -= lambda*s1; sum2 += lambda*s2;
             }
-            if( fabs(sum1) < 1e-13 || !sum2 ) {
+            if (fabs(sum1) < 1e-13 || !sum2) {
                 printf("Converged for l = %d (sums are %g,%g)\n",l,sum1,sum2);
                 fflush(stdout);
                 continue;
@@ -508,42 +265,42 @@ int main(int argc, char **argv) {
             double t = sum1/sum2;
             double Fn = computeF(l,s1,s2,t);
             double Fe = F1 - sum1*t;
-            if( Fn > Fe + 1e-6 ) {
+            if (Fn > Fe + 1e-6) {
                 double tn = sum1*t*t/(Fn - F1 + 2*t*sum1);
                 auto Fn1 = computeF(l,s1,s2,tn);
-                if( Fn1 < Fn ) { Fn = Fn1; t = tn; }
-                if( Fn > F1 ) printf("Oops: l=%d F[l]=%g Fn=%g Fe=%g t=%g, %g\n",l,F[l],Fn,Fe,t,tn);
+                if (Fn1 < Fn) { Fn = Fn1; t = tn; }
+                if (Fn > F1) printf("Oops: l=%d F[l]=%g Fn=%g Fe=%g t=%g, %g\n",l,F[l],Fn,Fe,t,tn);
             }
-            for(int j=0; j<npoint; ++j) { p[j] += t*dU[j]; totP2 += p[j]*p[j]; }
-            for(int i=0; i<ntrain; ++i) V[10*i+l] += t*dV[10*i+l];
+            for (int j=0; j<npoint; ++j) { p[j] += t*dU[j]; totP2 += p[j]*p[j]; }
+            for (int i=0; i<ntrain; ++i) V[10*i+l] += t*dV[10*i+l];
             totF += Fn;
             p += npoint; dU += npoint;
         }
         bool out = (iter+1)%20 == 0 ? true : false;
-        if( out ) {
+        if (out) {
             int ngoodTest = 0;
             auto B = testImages.data();
-            for(int i=0; i<kNtest; ++i) {
+            for (int i=0; i<kNtest; ++i) {
                 double best = -1e300; int lbest = -1;
                 auto p = P.data();
-                for(int l=0; l<10; ++l) {
-                    double s = 0; for(int j=0; j<npoint; ++j) s += p[j]*B[j];
-                    if( s > best ) { best = s; lbest = l; }
+                for (int l=0; l<10; ++l) {
+                    double s = 0; for (int j=0; j<npoint; ++j) s += p[j]*B[j];
+                    if (s > best) { best = s; lbest = l; }
                     p += npoint;
                 }
-                if( lbest == testLabels[i] ) ++ngoodTest;
+                if (lbest == testLabels[i]) ++ngoodTest;
                 B += npoint;
             }
             int ngood = 0, ngood1 = 0;
-            for(int i=0; i<ntrain; ++i) {
+            for (int i=0; i<ntrain; ++i) {
                 auto best = V[10*i]; int lbest = 0;
-                for(int l=1; l<10; ++l) if( V[10*i+l] > best ) { best = V[10*i+l]; lbest = l; }
-                if( lbest == labels[i] ) {
+                for (int l=1; l<10; ++l) if (V[10*i+l] > best) { best = V[10*i+l]; lbest = l; }
+                if (lbest == labels[i]) {
                     ++ngood;
-                    if( i < kNtrain ) ++ngood1;
+                    if (i < kNtrain) ++ngood1;
                 }
             }
-            if( ngoodTest >= bestNgood ) {
+            if (ngoodTest >= bestNgood) {
                 bestNgood = ngoodTest;
                 bestP = P;
                 writeResults(ofile,npoint,patterns,bestP);
@@ -554,17 +311,17 @@ int main(int argc, char **argv) {
                     iter+1,totF,totF-lambda*totP2,totP2,ngood,ngood1,ngoodTest,time);
             fflush(stdout);
         }
-        if( allConverged ) break;
-        if( Fold/totF-1 < 1e-10 ) {
+        if (allConverged ) break;
+        if (Fold/totF-1 < 1e-10) {
             ++nconv;
-            if( nconv > 3 ) {
+            if (nconv > 3) {
                 printf("Converged at iteration %d with F = %g (%g) (change is %g)\n",
                         iter,totF,totF-lambda*totP2,Fold/totF-1); break;
             }
         }
         else nconv = 0;
         Fvalues[iter] = totF;
-        if( iter >= 50 && Fvalues[iter-50]/totF - 1 < 1e-4 ) {
+        if (iter >= 50 && Fvalues[iter-50]/totF - 1 < 1e-4) {
             printf("Terminating due to too small change (%g) in the last 50 iterations\n",Fvalues[iter-50]/totF - 1);
             break;
         }
@@ -578,12 +335,12 @@ int main(int argc, char **argv) {
 
     std::vector<std::pair<float,int>> X(10);
     int ngood = 0, ngood1 = 0;
-    for(int i=0; i<ntrain; ++i) {
+    for (int i=0; i<ntrain; ++i) {
         auto best = V[10*i]; int lbest = 0;
-        for(int l=1; l<10; ++l) if( V[10*i+l] > best ) { best = V[10*i+l]; lbest = l; }
-        if( lbest == labels[i] ) {
+        for (int l=1; l<10; ++l) if (V[10*i+l] > best) { best = V[10*i+l]; lbest = l; }
+        if (lbest == labels[i]) {
             ++ngood;
-            if( i < kNtrain ) ++ngood1;
+            if (i < kNtrain) ++ngood1;
         }
     }
     printf("Training: ngood = %d (%g)  %d (%g)\n",ngood,(1.*ngood)/ntrain,ngood1,(1.*ngood1)/kNtrain);
@@ -592,26 +349,26 @@ int main(int argc, char **argv) {
     int ncheck = 5;
     std::vector<int> Ngood(ncheck,0);
     std::vector<std::pair<float,int>> predicted(2*kNtest);
-    for(int i=0; i<kNtest; ++i) {
+    for (int i=0; i<kNtest; ++i) {
         auto B = testImages.data() + i*npoint;
         auto p = P.data();
-        for(int l=0; l<10; ++l) {
+        for (int l=0; l<10; ++l) {
             double s = 0; for(int j=0; j<npoint; ++j) s += p[j]*B[j];
             X[l] = {s,l};
             p += npoint;
         }
         std::sort(X.begin(),X.end());
-        predicted[2*i] = X[9];
+        predicted[2*i+0] = X[9];
         predicted[2*i+1] = X[8];
-        for(int k=9; k>=0; --k) {
-            if( X[k].second == testLabels[i] ) {
+        for (int k=9; k>=0; --k) {
+            if (X[k].second == testLabels[i]) {
                 int n = 9 - k;
-                for(int j=n; j<ncheck; ++j) ++Ngood[j];
+                for (int j=n; j<ncheck; ++j) ++Ngood[j];
                 break;
             }
         }
     }
-    for(int n=0; n<ncheck; ++n) printf("%d  %d\n",n,Ngood[n]);
+    for (int n=0; n<ncheck; ++n) printf("%d  %d\n",n,Ngood[n]);
 
     writeResults(ofile,npoint,patterns,bestP);
 

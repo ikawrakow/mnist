@@ -26,6 +26,22 @@ add_executable(mnist_knn_v3 mnist_knn_v3.cpp getImages.h getImages.cpp imageUtil
 
 add_executable(mnist_knn_v4 mnist_knn_v4.cpp getImages.h getImages.cpp imageUtils.h imageUtils.cpp)
 
-add_executable(mnist_svm_train mnist_svm_train.cpp getImages.h getImages.cpp imageUtils.h imageUtils.cpp bfgs.h bfgs.cpp)
+add_executable(mnist_svm_train
+    mnist_svm_train.cpp
+    getImages.h
+    getImages.cpp
+    imageUtils.h
+    imageUtils.cpp
+    bfgs.h
+    bfgs.cpp
+    svmPattern.h
+    svmPattern.cpp
+)
 
-add_executable(mnist_svm_predict mnist_svm_predict.cpp getImages.h getImages.cpp)
+add_executable(mnist_svm_predict
+    mnist_svm_predict.cpp
+    getImages.h
+    getImages.cpp
+    svmPattern.h
+    svmPattern.cpp
+)
