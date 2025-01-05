@@ -169,6 +169,80 @@ void addElasticDeformationsSameT(std::vector<uint8_t>& images, std::vector<uint8
     addElasticDeformationsSameT(images, labels, nAdd, 6., 38., 0, nullptr);
 }
 
+void addElasticDeformations(int nx, int ny, std::vector<uint8_t>& images, std::vector<uint8_t>& labels, int nAdd,
+        double sigGauss, double alpha, int seq, const char *fname) {
+    if (nAdd < 1) return;
+    auto tim1 = std::chrono::steady_clock::now();
+    int nimage = labels.size();
+    uint64_t nnew = (nAdd+1)*nimage;
+    uint64_t ntot = nnew*nx*ny;
+    printf("Adding %d elastic deformations with sigmaGauss=%g alpha=%g. New number of images is %g\n",nAdd,sigGauss,alpha,1.*nnew);
+    labels.resize(nnew);
+    images.resize(ntot);
+    int margin = toNearestInt(2*sigGauss);
+    int nthread = std::thread::hardware_concurrency();
+    int chunk1 = nimage/nthread; if (chunk1*nthread != nimage) ++chunk1;
+    int chunk2 = chunk1/128; if (chunk2*128 != chunk1) ++chunk2;
+    int chunk = 128*chunk2;
+    if (!chunk) chunk = 128;
+    printf("%s: %d images, chunk size is %d\n",__func__,nimage,chunk);
+    std::atomic<int> counter(0);
+    auto compute = [&counter,&images,&labels,sigGauss,alpha,nimage,nAdd,margin,chunk,seq,nx,ny]() {
+        int first = counter.fetch_add(chunk);
+        if (first >= nimage) return;
+        int tid = first/chunk;
+        std::mt19937 rng(5489+seq+tid);
+        auto rndm = [&rng] () {
+            constexpr double rnorm = 1./4294967296.;
+            return rnorm*rng();
+        };
+        int Nx = nx + 2*margin, Ny = ny + 2*margin;
+        GaussianBlur gauss(sigGauss,Nx,Ny);
+        std::vector<float> ux(Nx*Ny), uy(Nx*Ny), uxb(Nx*Ny), uyb(Nx*Ny);
+        int last = first + chunk; if( last > nimage ) last = nimage;
+        for(int i=first; i<last; ++i) {
+            const uint8_t *A = &images[i*nx*ny];
+            uint64_t start1 = nimage + i*nAdd;
+            uint64_t start2 = start1*nx*ny;
+            uint8_t *B = &images[start2], *L = &labels[start1];
+            for (int it=0; it<nAdd; ++it) {
+                for (int i=0; i<Nx*Ny; ++i) { ux[i] = 2*rndm()-1; uy[i] = 2*rndm()-1; }
+                gauss.blurImage(ux.data(),uxb.data());
+                gauss.blurImage(uy.data(),uyb.data());
+                for (int y=0; y<ny; ++y) for (int x=0; x<nx; ++x) {
+                    float x1 = alpha*uxb[x+margin+(y+margin)*Nx] + x;
+                    float y1 = alpha*uyb[x+margin+(y+margin)*Nx] + y;
+                    if( x1 >= 0 && x1 < nx && y1 >= 0 && y1 < ny ) {
+                        int ix1 = (int)x1, iy1 = (int)y1;
+                        x1 -= ix1; y1 -= iy1;
+                        int ix2 = ix1 + 1; float x2 = 1 - x1; if( ix2 >= nx ) { ix2 = nx-1; x1 = 1; x2 = 0; } 
+                        int iy2 = iy1 + 1; float y2 = 1 - y1; if( iy2 >= ny ) { iy2 = ny-1; y1 = 1; y2 = 0; } 
+                        float b = y1*(x1*A[ix2+iy2*nx] + x2*A[ix1+iy2*nx])+y2*(x1*A[ix2+iy1*nx] + x2*A[ix1+iy1*nx]);
+                        B[x+y*nx] = toNearestInt(b);
+                    }
+                    else B[x+y*nx] = 0;
+                }
+                B += nx*ny; *L++ = labels[i];
+            }
+        }
+    };
+    std::vector<std::thread> workers(nthread);
+    for (auto& w : workers) w = std::thread(compute);
+    for (auto& w : workers) w.join();
+    auto tim2 = std::chrono::steady_clock::now();
+    auto time = 1e-3*std::chrono::duration_cast<std::chrono::milliseconds>(tim2-tim1).count();
+    printf("%s: finished in %g seconds\n",__func__,time);
+    if (fname) {
+        std::ofstream out(fname,std::ios::binary);
+        out.write((char *)&images[nimage*nx*ny],ntot-nimage*nx*ny);
+        printf("Wrote %d distorted images to %s\n",nAdd*nimage,fname);
+    }
+}
+
+void addElasticDeformations(std::vector<uint8_t>& images, std::vector<uint8_t>& labels, int nAdd) {
+    addElasticDeformations(kNx, kNy, images, labels, nAdd, 6., 38., 0, nullptr);
+}
+
 void addAffineTransformations(int Nx, int Ny, std::vector<uint8_t> &images, std::vector<uint8_t> &labels, int nAffine,
         double phiRangle, double shearRange, double zoomRange, double shiftXrange, double shiftYrange,
         int rng_seq, bool recenter) {

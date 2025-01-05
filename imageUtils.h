@@ -9,6 +9,11 @@ void addElasticDeformationsSameT(std::vector<uint8_t>& images, std::vector<uint8
 
 void addElasticDeformationsSameT(std::vector<uint8_t>& images, std::vector<uint8_t>& labels, int nAdd);
 
+void addElasticDeformations(int nx, int ny, std::vector<uint8_t>& images, std::vector<uint8_t>& labels, int nAdd,
+        double sigGauss, double alpha, int seq, const char* fname);
+
+void addElasticDeformations(std::vector<uint8_t>& images, std::vector<uint8_t>& labels, int nAdd);
+
 void addAffineTransformations(int Nx, int Ny, std::vector<uint8_t>& images, std::vector<uint8_t>& labels, int nAffine,
         double phiRangle, double shearRange, double zoomRange, double shiftXrange, double shiftYrange,
         int rng_seq, bool recenter = false);
