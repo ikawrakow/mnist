@@ -45,3 +45,5 @@ add_executable(mnist_svm_predict
     svmPattern.h
     svmPattern.cpp
 )
+
+add_executable(svm_combine svm_combine.cpp)
