@@ -14,8 +14,9 @@
 #include <limits>
 
 template <typename Float>
-void computeFdF(Float norm, const std::vector<uint8_t>& labels, const std::vector<Float>& V,
+double computeFdF(Float norm, const std::vector<uint8_t>& labels, const std::vector<Float>& V,
         std::vector<Float>& dfdv, std::vector<Float>& d2fdv2, std::vector<Float>& F) {
+    auto t1 = std::chrono::steady_clock::now();
     int nimage = labels.size();
     for (int j=0; j<kNlabels*nimage; ++j) dfdv[j] = d2fdv2[j] = 0;
     for (auto& f : F) f = 0;
@@ -33,6 +34,8 @@ void computeFdF(Float norm, const std::vector<uint8_t>& labels, const std::vecto
         }
         F[l] = norm*f;
     }
+    auto t2 = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
 }
 
 template <typename Float>
@@ -123,7 +126,7 @@ double computeVfast(const std::vector<uint8_t>& dImage, std::vector<Float>& dv, 
 }
 
 template <typename Float>
-void writeResults(const char *ofile, int npoint, const std::vector<Pattern> &patterns, const std::vector<Float> &P) {
+void writeResults(const char *ofile, int npoint, const std::vector<Pattern> &patterns, const std::vector<Float> &P, bool tell = false) {
     std::ofstream out(ofile,std::ios::binary);
     int npattern = patterns.size();
     out.write((char *)&npattern,sizeof(int));
@@ -136,8 +139,10 @@ void writeResults(const char *ofile, int npoint, const std::vector<Pattern> &pat
     }
     out.write((char *)&npoint,sizeof(int));
     out.write((char *)P.data(),P.size()*sizeof(Float));
-    printf("Wrote training results to %s\n",ofile);
-    fflush(stdout);
+    if (tell) {
+        printf("Wrote training results to %s\n",ofile);
+        fflush(stdout);
+    }
 }
 
 int main(int argc, char **argv) {
@@ -229,30 +234,26 @@ int main(int argc, char **argv) {
     };
 
     Float Fold = std::numeric_limits<Float>::max();
-    double totTime = 0, totPtime = 0, totVtime = 0;
+    double totTime = 0, totItime = 0, totFtime = 0, totStime = 0, totUtime, totPtime = 0, totVtime = 0, totCtime = 0;
 
     std::vector<Float> bestP(kNlabels*npoint,0);
     int bestNgood = 0;
     int nconv = 0;
 
-    auto tStart = std::chrono::steady_clock::now();
-
-    for (int iter=0; iter<niter; ++iter) {
-
-        auto p = P.data(); auto dp = dP.data();
-        for (int l=0; l<kNlabels; ++l) {
-            Float s = 0;
-            for (int j=0; j<npoint; ++j) { dp[j] = 2*lambda*p[j]; s += p[j]*p[j]; }
-            sump2[l] = s;
-            p += npoint; dp += npoint;
-        }
-        computeFdF(norm,labels,V,dfdv,d2fdv2,F);
-        totPtime += computeP(images,dfdv,dP,npoint,ntrain,chunk,workers);
+    auto setSearchDirection = [&bfgs, &F, &P, &dP, &du, npoint] () {
+        auto t1 = std::chrono::steady_clock::now();
         for (int l=0; l<kNlabels; ++l) bfgs[l].setSearchDirection(F[l],P.data()+npoint*l,dP.data()+npoint*l,du.data()+npoint*l);
-        totVtime += computeVfast(images,dV,du,ui,npoint,ntrain,workers);
-        Float totF = 0, totP2 = 0;
-        bool allConverged = true;
-        p = P.data(); auto dU = du.data();
+        auto t2 = std::chrono::steady_clock::now();
+        return (double)std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
+    };
+
+    Float totF, totP2;
+    bool allConverged;
+    auto takeStep = [&computeF, &F, &totF, &totP2, &allConverged, &P, &du, &sump2, &V, &dV, &dfdv, &d2fdv2, lambda, ntrain, npoint] () {
+        auto tim1 = std::chrono::steady_clock::now();
+        totF = totP2 = 0;
+        allConverged = true;
+        auto p = P.data(); auto dU = du.data();
         for (int l=0; l<kNlabels; ++l) {
             Float F1 = F[l] + lambda*sump2[l];
             Float sum1 = 0, sum2 = 0;
@@ -283,61 +284,123 @@ int main(int argc, char **argv) {
             totF += Fn;
             p += npoint; dU += npoint;
         }
-        bool out = (iter+1)%20 == 0 ? true : false;
-        if (out) {
-            int ngoodTest = 0;
-            auto B = testImages.data();
-            for (int i=0; i<kNtest; ++i) {
-                Float best = -std::numeric_limits<Float>::max(); int lbest = -1;
-                auto p = P.data();
-                for (int l=0; l<kNlabels; ++l) {
-                    Float s = 0; for (int j=0; j<npoint; ++j) s += p[j]*B[j];
-                    if (s > best) { best = s; lbest = l; }
-                    p += npoint;
-                }
-                if (lbest == testLabels[i]) ++ngoodTest;
-                B += npoint;
-            }
-            int ngood = 0, ngood1 = 0;
-            for (int i=0; i<ntrain; ++i) {
-                auto best = V[kNlabels*i]; int lbest = 0;
-                for (int l=1; l<kNlabels; ++l) if (V[kNlabels*i+l] > best) { best = V[kNlabels*i+l]; lbest = l; }
-                if (lbest == labels[i]) {
-                    ++ngood;
-                    if (i < kNtrain) ++ngood1;
-                }
-            }
-            if (ngoodTest >= bestNgood) {
-                bestNgood = ngoodTest;
-                bestP = P;
-                writeResults(ofile,npoint,patterns,bestP);
-            }
-            auto tNow = std::chrono::steady_clock::now();
-            auto time = 1e-6*std::chrono::duration_cast<std::chrono::microseconds>(tNow-tStart).count();
-            printf("  Iteration %d: F=%g(%g) sump2=%g, Ngood=%d,%d,%d  time=%g s\n",
-                    iter+1,totF,totF-lambda*totP2,totP2,ngood,ngood1,ngoodTest,time);
-            fflush(stdout);
+        auto tim2 = std::chrono::steady_clock::now();
+        return (double)std::chrono::duration_cast<std::chrono::microseconds>(tim2-tim1).count();
+    };
+
+    auto initIteration = [&P, &dP, &sump2, npoint, lambda] () {
+        auto tim1 = std::chrono::steady_clock::now();
+        auto p = P.data(); auto dp = dP.data();
+        for (int l=0; l<kNlabels; ++l) {
+            Float s = 0;
+            for (int j=0; j<npoint; ++j) { dp[j] = 2*lambda*p[j]; s += p[j]*p[j]; }
+            sump2[l] = s;
+            p += npoint; dp += npoint;
         }
-        if (allConverged ) break;
+        auto tim2 = std::chrono::steady_clock::now();
+        return (double)std::chrono::duration_cast<std::chrono::microseconds>(tim2-tim1).count();
+    };
+
+    auto predictTest = [&testImages, testLabels, &P, &workers, npoint] () {
+        std::vector<int> R(workers.size());
+        std::atomic<int> counter(0);
+        auto compute = [&counter, &testImages, &testLabels, &P, &R, npoint] (int it) {
+            constexpr int kChunk = 64;
+            int ngood = 0;
+            while (true) {
+                int first = counter.fetch_add(kChunk);
+                if (first >= kNtest) {
+                    R[it] = ngood; break;
+                }
+                int last = std::min(first + kChunk, (int)kNtest);
+                auto B = testImages.data() + uint64_t(first)*npoint;
+                for (int i = first; i < last; ++i) {
+                    auto p = P.data();
+                    Float best = -std::numeric_limits<Float>::max(); int lbest = -1;
+                    for (int l=0; l<kNlabels; ++l) {
+                        Float s = 0; for (int j=0; j<npoint; ++j) s += p[j]*B[j];
+                        if (s > best) { best = s; lbest = l; }
+                        p += npoint;
+                    }
+                    if (lbest == testLabels[i]) ++ngood;
+                    B += npoint;
+                }
+            }
+        };
+        int it = 0;
+        for (auto& w : workers) w = std::thread(compute, it++);
+        for (auto& w : workers) w.join();
+        int ngood = 0;
+        for (auto n : R) ngood += n;
+        return ngood;
+    };
+
+    auto tStart = std::chrono::steady_clock::now();
+
+    auto checkResults = [&predictTest, &P, &V, &labels, &bestP, &bestNgood, &patterns, &totF, &totP2, &workers,
+         npoint, ntrain, lambda, tStart, ofile] (int iter) {
+        auto tim1 = std::chrono::steady_clock::now();
+        int ngoodTest = predictTest();
+        int ngood = 0, ngood1 = 0;
+        for (int i=0; i<ntrain; ++i) {
+            auto best = V[kNlabels*i]; int lbest = 0;
+            for (int l=1; l<kNlabels; ++l) if (V[kNlabels*i+l] > best) { best = V[kNlabels*i+l]; lbest = l; }
+            if (lbest == labels[i]) {
+                ++ngood;
+                if (i < kNtrain) ++ngood1;
+            }
+        }
+        if (ngoodTest >= bestNgood) {
+            bestNgood = ngoodTest;
+            bestP = P;
+            writeResults(ofile,npoint,patterns,bestP);
+        }
+        auto tNow = std::chrono::steady_clock::now();
+        auto time = 1e-6*std::chrono::duration_cast<std::chrono::microseconds>(tNow-tStart).count();
+        printf("  Iteration %d: F=%g(%g) sump2=%g, Ngood=%d,%d,%d  time=%g s\n",
+                iter+1,totF,totF-lambda*totP2,totP2,ngood,ngood1,ngoodTest,time);
+        fflush(stdout);
+        auto tim2 = std::chrono::steady_clock::now();
+        return (double)std::chrono::duration_cast<std::chrono::microseconds>(tim2-tim1).count();
+    };
+
+    auto checkIfConverged = [&totF, &totP2, &Fold, &Fvalues, &nconv, lambda] (int iter) {
         if (Fold/totF-1 < 1e-10) {
             ++nconv;
             if (nconv > 3) {
                 printf("Converged at iteration %d with F = %g (%g) (change is %g)\n",
-                        iter,totF,totF-lambda*totP2,Fold/totF-1); break;
+                        iter,totF,totF-lambda*totP2,Fold/totF-1); return true;
             }
         }
         else nconv = 0;
         Fvalues[iter] = totF;
         if (iter >= 50 && Fvalues[iter-50]/totF - 1 < 1e-4) {
             printf("Terminating due to too small change (%g) in the last 50 iterations\n",Fvalues[iter-50]/totF - 1);
-            break;
+            return true;
         }
         Fold = totF;
+        return false;
+    };
+
+    for (int iter=0; iter<niter; ++iter) {
+
+        totItime += initIteration();
+        totFtime += computeFdF(norm,labels,V,dfdv,d2fdv2,F);
+        totPtime += computeP(images,dfdv,dP,npoint,ntrain,chunk,workers);
+        totStime += setSearchDirection();
+        totVtime += computeVfast(images,dV,du,ui,npoint,ntrain,workers);
+        totUtime += takeStep();
+        if ((iter+1)%20 == 0) {
+            totCtime += checkResults(iter);
+        }
+        if (allConverged) break;
+        if (checkIfConverged(iter)) break;
     }
 
     auto tEnd = std::chrono::steady_clock::now();
     auto time = 1e-3*std::chrono::duration_cast<std::chrono::microseconds>(tEnd-tStart).count();
-    printf("Total time: %g ms, V-time: %g ms, P-time: %g ms\n",time,1e-3*totVtime,1e-3*totPtime);
+    printf("Total time: %g ms, I-time: %g ms, F-time: %g ms, S-time: %g ms, U-time: %g ms, V-time: %g ms, P-time: %g ms, C-time: %g ms\n",time,
+            1e-3*totItime,1e-3*totFtime,1e-3*totStime,1e-3*totUtime,1e-3*totVtime,1e-3*totPtime, 1e-3*totCtime);
     fflush(stdout);
 
     std::vector<std::pair<float,int>> X(kNlabels);
@@ -377,7 +440,7 @@ int main(int argc, char **argv) {
     }
     for (int n=0; n<ncheck; ++n) printf("%d  %d\n",n,Ngood[n]);
 
-    writeResults(ofile,npoint,patterns,bestP);
+    writeResults(ofile,npoint,patterns,bestP,true);
 
     return 0;
 }
