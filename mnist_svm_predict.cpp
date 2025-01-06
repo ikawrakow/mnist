@@ -11,7 +11,22 @@
 #include <chrono>
 #include <fstream>
 
-static bool loadModel(const char* fname, std::vector<Pattern>& patterns, std::vector<std::vector<double>>& allP) {
+//#ifdef __AVX2__
+//#include <immintrin.h>
+//
+//inline int hsum_i32_8(const __m256i a) {
+//    const __m128i sum128 = _mm_add_epi32(_mm256_castsi256_si128(a), _mm256_extractf128_si256(a, 1));
+//    const __m128i hi64 = _mm_unpackhi_epi64(sum128, sum128);
+//    const __m128i sum64 = _mm_add_epi32(hi64, sum128);
+//    const __m128i hi32  = _mm_shuffle_epi32(sum64, _MM_SHUFFLE(2, 3, 0, 1));
+//    return _mm_cvtsi128_si32(_mm_add_epi32(sum64, hi32));
+//}
+//#endif
+
+using Float = float;
+
+static bool loadModel(const char* fname, std::vector<Pattern>& patterns,
+        std::vector<Float>& scales, std::vector<std::vector<int16_t>>& allP) {
     std::ifstream in(fname,std::ios::binary);
     if (!in) {
         printf("%s: failed top open %s\n",__func__,fname); return false;
@@ -28,11 +43,23 @@ static bool loadModel(const char* fname, std::vector<Pattern>& patterns, std::ve
         in.read((char *)&p.down_,sizeof(p.down_));
     }
     if ((int)allP.size() != kNlabels) allP.resize(kNlabels);
+    if ((int)scales.size() != kNlabels) scales.resize(kNlabels);
     int npoint;
     in.read((char *)&npoint,sizeof(int));
+    std::vector<float> aux(npoint);
+    int l = 0;
     for (auto & p : allP) {
         p.resize(npoint);
-        in.read((char *)p.data(),p.size()*sizeof(double));
+        in.read((char *)aux.data(),p.size()*sizeof(Float));
+        Float max = 0;
+        for (int j = 0; j < npoint; ++j) {
+            Float ax = std::abs(aux[j]);
+            max = std::max(max, ax);
+        }
+        scales[l] = max/32766;
+        Float is = scales[l] ? 1/scales[l] : 0;
+        for (int j = 0; j < npoint; ++j) p[j] = toNearestInt(is*aux[j]);
+        ++l;
     }
     return in.good() ? true : false;
 }
@@ -56,8 +83,9 @@ int main(int argc, char **argv) {
 
     printf("\n============================== Dataset %s\n",argv[1]);
     std::vector<Pattern> patterns;
-    std::vector<std::vector<double>> allP(kNlabels);
-    if (!loadModel(argv[1],patterns,allP)) return 1;
+    std::vector<Float> scales;
+    std::vector<std::vector<int16_t>> allP(kNlabels);
+    if (!loadModel(argv[1],patterns,scales,allP)) return 1;
 
     auto tim1 = std::chrono::steady_clock::now();
 
@@ -71,7 +99,7 @@ int main(int argc, char **argv) {
     printf("# %d points per image\n",npoint);
     std::atomic<int> counter(0);
     std::vector<float> V(kNlabels*kNtest);
-    auto predict = [&counter, &allP, &testImages, &V, npoint]() {
+    auto predict = [&counter, &scales, &allP, &testImages, &V, npoint]() {
         int chunk = 64;
         while (true) {
             int first = counter.fetch_add(chunk);
@@ -82,8 +110,21 @@ int main(int argc, char **argv) {
                 auto v = V.data() + kNlabels*first + l;
                 auto& p = allP[l];
                 for (int i=0; i<n; ++i) {
-                    double s = 0; for(int j=0; j<npoint; ++j) s += p[j]*B[j];
-                    *v = s; v += kNlabels; B += npoint;
+                    int s = 0;
+//#ifdef __AVX2__
+//                    __m256i sum = _mm256_setzero_si256();
+//                    for(int j=0; j<npoint/16; ++j) {
+//                        auto vp = _mm256_loadu_si256((const __m256i *)p.data() + j);
+//                        auto vb = _mm256_cvtepu8_epi16(_mm_loadu_si128((const __m128i *)B + j));
+//                        sum = _mm256_add_epi32(sum, _mm256_madd_epi16(vp, vb));
+//                    }
+//                    s = hsum_i32_8(sum);
+//                    for (int j = 16*(npoint/16); j < npoint; ++j) s += p[j]*B[j];
+//#else
+                    for(int j=0; j<npoint; ++j) s += p[j]*B[j];
+//#endif
+                    *v = scales[l]*s;
+                    v += kNlabels; B += npoint;
                 }
             }
         }
@@ -107,7 +148,7 @@ int main(int argc, char **argv) {
         for(int k=0; k<(int)confLevels.size(); ++k) {
             if (delta > confLevels[k]) {
                 ++count[k];
-                if (X[kNlabels].second == testLabels[i]) ++countGood[k];
+                if (X[kNlabels-1].second == testLabels[i]) ++countGood[k];
             }
         }
         for(int k=kNlabels-1; k>=0; --k) {

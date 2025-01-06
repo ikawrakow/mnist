@@ -11,18 +11,20 @@
 #include <atomic>
 #include <chrono>
 #include <fstream>
+#include <limits>
 
-void computeFdF(double norm, const std::vector<uint8_t> &labels, const std::vector<double> &V,
-        std::vector<double> &dfdv, std::vector<double> &d2fdv2, std::vector<double> &F) {
+template <typename Float>
+void computeFdF(Float norm, const std::vector<uint8_t>& labels, const std::vector<Float>& V,
+        std::vector<Float>& dfdv, std::vector<Float>& d2fdv2, std::vector<Float>& F) {
     int nimage = labels.size();
     for (int j=0; j<kNlabels*nimage; ++j) dfdv[j] = d2fdv2[j] = 0;
     for (auto& f : F) f = 0;
-    double n = 2*norm;
+    Float n = 2*norm;
     for (int l=0; l<kNlabels; ++l) {
-        double f = 0;
+        Float f = 0;
         for (int i=0; i<nimage; ++i) {
             auto y = labels[i] == l ? 1 : -1;
-            double d = 1 - V[kNlabels*i+l]*y;
+            Float d = 1 - V[kNlabels*i+l]*y;
             if (d > 0) {
                 f += d*d;
                 dfdv[kNlabels*i+l] -= n*d*y;
@@ -33,12 +35,13 @@ void computeFdF(double norm, const std::vector<uint8_t> &labels, const std::vect
     }
 }
 
-double computeP(const std::vector<uint8_t> &dImage, const std::vector<double> &dfdv, std::vector<double> &dp,
-        int npoint, int nimage, int chunk, std::vector<std::thread> &workers) {
+template <typename Float>
+double computeP(const std::vector<uint8_t>& dImage, const std::vector<Float>& dfdv, std::vector<Float>& dp,
+        int npoint, int nimage, int chunk, std::vector<std::thread>& workers) {
     auto t1 = std::chrono::steady_clock::now();
     std::atomic<int> counter(0);
     auto compute = [&dImage,&dfdv,&dp,&counter,npoint,nimage,chunk]() {
-        std::vector<double> tmp(kNlabels*chunk);
+        std::vector<Float> tmp(kNlabels*chunk);
         while (true) {
             int first = counter.fetch_add(chunk);
             if (first >= npoint) break;
@@ -48,13 +51,13 @@ double computeP(const std::vector<uint8_t> &dImage, const std::vector<double> &d
             for (int i=0; i<nimage; ++i) {
                 auto t = tmp.data();
                 for (int l=0; l<kNlabels; ++l) {
-                    double d = dfdv[kNlabels*i+l];
+                    Float d = dfdv[kNlabels*i+l];
                     if (d) for(int j=0; j<n; ++j) t[j] += d*A[j];
                     t += n;
                 }
                 A += npoint;
             }
-            double *p = &dp[first];
+            auto p = &dp[first];
             for (int l=0; l<kNlabels; ++l) for(int j=0; j<n; ++j) p[j+l*npoint] += tmp[n*l+j];
         }
     };
@@ -64,14 +67,20 @@ double computeP(const std::vector<uint8_t> &dImage, const std::vector<double> &d
     return std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
 }
 
-double computeVfast(const std::vector<uint8_t> &dImage, std::vector<double> &dv, std::vector<double> &du,
-        std::vector<int16_t> &ui, int npoint, int nimage,std::vector<std::thread> &workers) {
-    double scale[kNlabels], scaleI[kNlabels];
+template <typename Float>
+double computeVfast(const std::vector<uint8_t>& dImage, std::vector<Float>& dv, std::vector<Float>& du,
+        std::vector<int16_t>& ui, int npoint, int nimage,std::vector<std::thread> &workers) {
+    constexpr Float kUmax = 32766;
+    Float scale[kNlabels], scaleI[kNlabels];
     auto t1 = std::chrono::steady_clock::now();
     auto u = du.data(); auto iu = ui.data();
     for (int l=0; l<kNlabels; ++l) {
-        double um = 0; for (int j=0; j<npoint; ++j) if (fabs(u[j]) > um) um = fabs(u[j]);
-        scale[l] = 32766./um; scaleI[l] = um/32766.;
+        Float um = 0;
+        for (int j=0; j<npoint; ++j) {
+            Float au = std::abs(u[j]);
+            um = std::max(um, au);
+        }
+        scale[l] = kUmax/um; scaleI[l] = um/kUmax;
         for (int j=0; j<npoint; ++j) {
             iu[j] = toNearestInt(u[j]*scale[l]);
             u[j] = scaleI[l]*iu[j];
@@ -98,7 +107,8 @@ double computeVfast(const std::vector<uint8_t> &dImage, std::vector<double> &dv,
                         int si = 0; for (int k=0; k<128; ++k) si += (int)u[k] * a[k];
                         s += si; a += 128; u += 128;
                     }
-                    for (int k=0; k<nn; ++k) s += (int)u[k] * a[k];
+                    int si = 0; for (int k=0; k<nn; ++k) si += (int)u[k] * a[k];
+                    s += si;
                     a += nn; u += nn;
                     dv[kNlabels*i+l] = scaleI[l]*s;
                 }
@@ -112,7 +122,8 @@ double computeVfast(const std::vector<uint8_t> &dImage, std::vector<double> &dv,
     return std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
 }
 
-void writeResults(const char *ofile, int npoint, const std::vector<Pattern> &patterns, const std::vector<double> &P) {
+template <typename Float>
+void writeResults(const char *ofile, int npoint, const std::vector<Pattern> &patterns, const std::vector<Float> &P) {
     std::ofstream out(ofile,std::ios::binary);
     int npattern = patterns.size();
     out.write((char *)&npattern,sizeof(int));
@@ -124,21 +135,23 @@ void writeResults(const char *ofile, int npoint, const std::vector<Pattern> &pat
         out.write((char *)&p.down_,sizeof(p.down_));
     }
     out.write((char *)&npoint,sizeof(int));
-    out.write((char *)P.data(),P.size()*sizeof(double));
+    out.write((char *)P.data(),P.size()*sizeof(Float));
     printf("Wrote training results to %s\n",ofile);
     fflush(stdout);
 }
 
 int main(int argc, char **argv) {
 
+    using Float = float;
+
     int iarg = 1;
     int    niter  = argc > iarg ? atoi(argv[iarg++]) : 200;
     int    nadd   = argc > iarg ? atoi(argv[iarg++]) : 0;
-    double lambda = argc > iarg ? atof(argv[iarg++]) : 10.;
-    int    nhist  = argc > iarg ? atoi(argv[iarg++]) : 10;
-    int    rseq   = argc > iarg ? atoi(argv[iarg++]) : 0;
+    Float  lambda = argc > iarg ? atof(argv[iarg++]) : 10.;
     int    type   = argc > iarg ? atoi(argv[iarg++]) : 0;
-    auto   ofile  = argc > iarg ? argv[iarg++] : "test.dat";
+    auto   ofile  = argc > iarg ? argv[iarg++]       : "test.dat";
+    int    rseq   = argc > iarg ? atoi(argv[iarg++]) : 0;
+    int    nhist  = argc > iarg ? atoi(argv[iarg++]) : 10;
 
     auto labels = getTraningLabels();
     if (labels.size() != kNtrain) return 1;
@@ -187,37 +200,38 @@ int main(int argc, char **argv) {
     printf("%d points per image\n",npoint);
     fflush(stdout);
 
-    std::vector<double> V(kNlabels*ntrain,0), dV(kNlabels*ntrain,0), dfdv(kNlabels*ntrain), d2fdv2(kNlabels*ntrain),
-                        P(kNlabels*npoint,0), dP(kNlabels*npoint,0), du(kNlabels*npoint), sump2(kNlabels), F(kNlabels);
+    std::vector<Float> V(kNlabels*ntrain,0), dV(kNlabels*ntrain,0), dfdv(kNlabels*ntrain), d2fdv2(kNlabels*ntrain),
+                       P(kNlabels*npoint,0), dP(kNlabels*npoint,0), du(kNlabels*npoint), sump2(kNlabels), F(kNlabels);
     std::vector<int16_t> ui(kNlabels*npoint);
 
-    const double norm = 1.*kNlabels/ntrain;
+    const Float norm = 1.*kNlabels/ntrain;
 
     int chunk1 = npoint/(4*nthread);
     int chunk = 8; while (chunk < chunk1) chunk *= 2;
     printf("Using chunk=%d\n",chunk);
     fflush(stdout);
 
-    std::vector<double> Fvalues(niter);
+    std::vector<Float> Fvalues(niter);
     std::vector<BFGSHistory> bfgs;
     bfgs.reserve(kNlabels);
     for (int l=0; l<kNlabels; ++l) bfgs.emplace_back(npoint,nhist);
 
-    auto computeF = [ntrain,&sump2,lambda,norm,&V,&dV,&labels](int l, double s1, double s2, double t) -> double {
-        double Fn = lambda*(sump2[l] + 2*t*s1 + t*t*s2);
-        double F1 = 0;
+    auto computeF = [ntrain,&sump2,lambda,norm,&V,&dV,&labels](int l, Float s1, Float s2, Float t) -> Float {
+        Float Fn = lambda*(sump2[l] + 2*t*s1 + t*t*s2);
+        Float F1 = 0;
         for (int i=0; i<ntrain; ++i) {
             auto y = labels[i] == l ? 1 : -1;
             auto v = V[kNlabels*i+l] + t*dV[kNlabels*i+l];
-            double d = 1 - v*y;
+            Float d = 1 - v*y;
             if (d > 0) F1 += d*d;
         }
         return Fn + norm*F1;
     };
 
-    double Fold = 1e100; double totTime = 0, totPtime = 0, totVtime = 0;
+    Float Fold = std::numeric_limits<Float>::max();
+    double totTime = 0, totPtime = 0, totVtime = 0;
 
-    std::vector<double> bestP(kNlabels*npoint,0);
+    std::vector<Float> bestP(kNlabels*npoint,0);
     int bestNgood = 0;
     int nconv = 0;
 
@@ -227,7 +241,7 @@ int main(int argc, char **argv) {
 
         auto p = P.data(); auto dp = dP.data();
         for (int l=0; l<kNlabels; ++l) {
-            double s = 0;
+            Float s = 0;
             for (int j=0; j<npoint; ++j) { dp[j] = 2*lambda*p[j]; s += p[j]*p[j]; }
             sump2[l] = s;
             p += npoint; dp += npoint;
@@ -236,15 +250,15 @@ int main(int argc, char **argv) {
         totPtime += computeP(images,dfdv,dP,npoint,ntrain,chunk,workers);
         for (int l=0; l<kNlabels; ++l) bfgs[l].setSearchDirection(F[l],P.data()+npoint*l,dP.data()+npoint*l,du.data()+npoint*l);
         totVtime += computeVfast(images,dV,du,ui,npoint,ntrain,workers);
-        double totF = 0, totP2 = 0;
+        Float totF = 0, totP2 = 0;
         bool allConverged = true;
         p = P.data(); auto dU = du.data();
         for (int l=0; l<kNlabels; ++l) {
-            double F1 = F[l] + lambda*sump2[l];
-            double sum1 = 0, sum2 = 0;
+            Float F1 = F[l] + lambda*sump2[l];
+            Float sum1 = 0, sum2 = 0;
             for (int i=0; i<ntrain; ++i) { sum1 -= dV[kNlabels*i+l]*dfdv[kNlabels*i+l]; sum2 += dV[kNlabels*i+l]*dV[kNlabels*i+l]*d2fdv2[kNlabels*i+l]; }
             sum1 *= 0.5; sum2 *= 0.5;
-            double s1 = 0, s2 = 0;
+            Float s1 = 0, s2 = 0;
             if (lambda > 0) {
                 for (int j=0; j<npoint; ++j) { s1 += p[j]*dU[j]; s2 += dU[j]*dU[j]; }
                 sum1 -= lambda*s1; sum2 += lambda*s2;
@@ -255,11 +269,11 @@ int main(int argc, char **argv) {
                 continue;
             }
             allConverged = false;
-            double t = sum1/sum2;
-            double Fn = computeF(l,s1,s2,t);
-            double Fe = F1 - sum1*t;
+            Float t = sum1/sum2;
+            Float Fn = computeF(l,s1,s2,t);
+            Float Fe = F1 - sum1*t;
             if (Fn > Fe + 1e-6) {
-                double tn = sum1*t*t/(Fn - F1 + 2*t*sum1);
+                Float tn = sum1*t*t/(Fn - F1 + 2*t*sum1);
                 auto Fn1 = computeF(l,s1,s2,tn);
                 if (Fn1 < Fn) { Fn = Fn1; t = tn; }
                 if (Fn > F1) printf("Oops: l=%d F[l]=%g Fn=%g Fe=%g t=%g, %g\n",l,F[l],Fn,Fe,t,tn);
@@ -274,10 +288,10 @@ int main(int argc, char **argv) {
             int ngoodTest = 0;
             auto B = testImages.data();
             for (int i=0; i<kNtest; ++i) {
-                double best = -1e300; int lbest = -1;
+                Float best = -std::numeric_limits<Float>::max(); int lbest = -1;
                 auto p = P.data();
                 for (int l=0; l<kNlabels; ++l) {
-                    double s = 0; for (int j=0; j<npoint; ++j) s += p[j]*B[j];
+                    Float s = 0; for (int j=0; j<npoint; ++j) s += p[j]*B[j];
                     if (s > best) { best = s; lbest = l; }
                     p += npoint;
                 }
@@ -346,7 +360,7 @@ int main(int argc, char **argv) {
         auto B = testImages.data() + i*npoint;
         auto p = P.data();
         for (int l=0; l<kNlabels; ++l) {
-            double s = 0; for(int j=0; j<npoint; ++j) s += p[j]*B[j];
+            Float s = 0; for(int j=0; j<npoint; ++j) s += p[j]*B[j];
             X[l] = {s,l};
             p += npoint;
         }

@@ -12,8 +12,8 @@ std::vector<uint8_t> Pattern::apply(int Nx, int Ny, const std::vector<uint8_t>& 
     int margin = pattern.margin_; if( margin < 0 ) margin = -margin;
     int Nx1 = Nx - 2*margin, Ny1 = Ny - 2*margin;
     int Nx2 = Nx1, Ny2 = Ny1;
-    if( pattern.down_ ) {
-        if( pattern.down_ > 0 ) {
+    if (pattern.down_) {
+        if (pattern.down_ > 0) {
             Nx2 = (Nx2 - 2 + pattern.down_)/pattern.down_; Ny2 = (Ny2 - 2 + pattern.down_)/pattern.down_;
         }
         else { Nx2 = Nx1 + Ny1; Ny2 = 1; }
