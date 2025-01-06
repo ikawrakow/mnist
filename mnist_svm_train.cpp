@@ -186,7 +186,7 @@ int main(int argc, char **argv) {
         }
     }
     else if (nadd < 0) {
-        addAffineTransformations(kNx,kNy,images,labels,-nadd,12.,0.6,0.1,0.05,0.05,0,false);
+        addAffineTransformations(kNx,kNy,images,labels,-nadd,12.,0.6,0.1,0.05,0.05,rseq,false);
     }
     int ntrain = labels.size();
 
