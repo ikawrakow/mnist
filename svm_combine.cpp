@@ -71,12 +71,12 @@ int main(int argc, char **argv) {
             std::vector<std::vector<Float>> allP_j;
             if (!loadModel(argv[iarg], patterns_j, allP_j)) return 1;
             if (allP_j.size() != allP.size()) {
-                printf("Oops: allP_j.size = %zu vs allP.size = %zu for %s\n", allP_j.size(), allP_j.size(), argv[iarg]);
+                printf("Oops: allP_j.size = %zu vs allP.size = %zu for %s\n", allP_j.size(), allP.size(), argv[iarg]);
                 return 1;
             }
             for (int i = 0; i < int(allP.size()); ++i) {
                 if (allP_j[i].size() != allP[i].size()) {
-                    printf("Oops: allP_j[%d].size = %zu vs allP[%d].size = %zu for %s\n", i, allP_j.size(), i, allP_j.size(), argv[iarg]);
+                    printf("Oops: allP_j[%d].size = %zu vs allP[%d].size = %zu for %s\n", i, allP_j[i].size(), i, allP[i].size(), argv[iarg]);
                     return 1;
                 }
                 for (int j = 0; j < int(allP[i].size()); ++j) allP[i][j] += allP_j[i][j];
