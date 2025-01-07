@@ -21,19 +21,25 @@ double computeFdF(Float norm, const std::vector<uint8_t>& labels, const std::vec
     for (int j=0; j<kNlabels*nimage; ++j) dfdv[j] = d2fdv2[j] = 0;
     for (auto& f : F) f = 0;
     Float n = 2*norm;
-    for (int l=0; l<kNlabels; ++l) {
-        Float f = 0;
-        for (int i=0; i<nimage; ++i) {
-            auto y = labels[i] == l ? 1 : -1;
-            Float d = 1 - V[kNlabels*i+l]*y;
+    for (int i=0; i<nimage; ++i) {
+        int li = labels[i];
+        Float d = 1 - V[kNlabels*i+li];
+        if (d > 0) {
+            F[li] += d*d;
+            dfdv[kNlabels*i+li] -= n*d;
+            d2fdv2[kNlabels*i+li] += n;
+        }
+        for (int l = 0; l < kNlabels; ++l) {
+            if (l == li) continue;
+            Float d = 1 + V[kNlabels*i+l];
             if (d > 0) {
-                f += d*d;
-                dfdv[kNlabels*i+l] -= n*d*y;
+                F[l] += d*d;
+                dfdv[kNlabels*i+l] += n*d;
                 d2fdv2[kNlabels*i+l] += n;
             }
         }
-        F[l] = norm*f;
     }
+    for (auto& f : F) f *= norm;
     auto t2 = std::chrono::steady_clock::now();
     return std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
 }
@@ -90,13 +96,13 @@ double computeVfast(const std::vector<uint8_t>& dImage, std::vector<Float>& dv, 
         }
         u += npoint; iu += npoint;
     }
-    int nthread = 1 + workers.size();
+    int nthread = workers.size();
     int chunk1 = nimage/(8*nthread);
     int chunk = 16; while (chunk < chunk1) chunk *= 2;
     std::atomic<int> counter(0);
     auto compute = [&dImage,&dv,&ui,&counter,&scaleI,npoint,nimage,chunk]() {
-        int n128 = npoint/128;
-        int nn = npoint - 128*n128;
+        int n256 = npoint/256;
+        int nn = npoint - 256*n256;
         while (true) {
             int first = counter.fetch_add(chunk);
             if (first >= nimage) break;
@@ -106,11 +112,11 @@ double computeVfast(const std::vector<uint8_t>& dImage, std::vector<Float>& dv, 
                 auto u = ui.data();
                 for (int l=0; l<kNlabels; ++l) {
                     int64_t s = 0; auto a = A;
-                    for (int i128=0; i128<n128; ++i128) {
-                        int si = 0; for (int k=0; k<128; ++k) si += (int)u[k] * a[k];
-                        s += si; a += 128; u += 128;
+                    for (int i256=0; i256<n256; ++i256) {
+                        int si = 0; for (int k=0; k<256; ++k) si += u[k] * a[k];
+                        s += si; a += 256; u += 256;
                     }
-                    int si = 0; for (int k=0; k<nn; ++k) si += (int)u[k] * a[k];
+                    int si = 0; for (int k=0; k<nn; ++k) si += u[k] * a[k];
                     s += si;
                     a += nn; u += nn;
                     dv[kNlabels*i+l] = scaleI[l]*s;
@@ -258,7 +264,10 @@ int main(int argc, char **argv) {
         for (int l=0; l<kNlabels; ++l) {
             Float F1 = F[l] + lambda*sump2[l];
             Float sum1 = 0, sum2 = 0;
-            for (int i=0; i<ntrain; ++i) { sum1 -= dV[kNlabels*i+l]*dfdv[kNlabels*i+l]; sum2 += dV[kNlabels*i+l]*dV[kNlabels*i+l]*d2fdv2[kNlabels*i+l]; }
+            for (int i=0; i<ntrain; ++i) {
+                sum1 -= dV[kNlabels*i+l]*dfdv[kNlabels*i+l];
+                sum2 += dV[kNlabels*i+l]*dV[kNlabels*i+l]*d2fdv2[kNlabels*i+l];
+            }
             sum1 *= 0.5; sum2 *= 0.5;
             Float s1 = 0, s2 = 0;
             if (lambda > 0) {
