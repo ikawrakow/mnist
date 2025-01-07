@@ -25,7 +25,8 @@ template<typename T> double BFGSHistory::setSearchDirectionT(double F, const T *
         for (int j=0; j<np_; ++j) du[j] = -dp[j];
         return 1;
     }
-    int index = index_; if( index >= nh_ ) index -= nh_;
+    int index = index_;
+    if (index >= nh_) index -= nh_;
     double dxdg = 0, dgnorm = 0, gnorm = 0;
     if (!first_) {
         for (int j=0; j<np_; ++j) {
@@ -53,7 +54,7 @@ template<typename T> double BFGSHistory::setSearchDirectionT(double F, const T *
     }
     if (nhave_ < nh_) ++nhave_;
     rhoi_[index] = 1/dxdg;
-    index_ = index++;
+    index_ = ++index;
     int h = index;
     for (int hh=0; hh<nhave_; ++hh) {
         h = (h + nh_ - 1) % nh_;
