@@ -254,46 +254,71 @@ int main(int argc, char **argv) {
         return (double)std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
     };
 
+    std::vector<Float> allFn(kNlabels), allP2(kNlabels);
+    std::vector<bool> isConverged(kNlabels);
+    auto takeStep1label = [&computeF, &F, &P, &du, &V, &dV, &dfdv, &d2fdv2, &sump2, &allFn, &allP2, &isConverged, lambda, ntrain, npoint] (int l) {
+        auto p = P.data() + l*npoint; auto dU = du.data() + l*npoint;
+        Float F1 = F[l] + lambda*sump2[l];
+        Float sum1 = 0, sum2 = 0;
+        for (int i=0; i<ntrain; ++i) {
+            sum1 -= dV[kNlabels*i+l]*dfdv[kNlabels*i+l];
+            sum2 += dV[kNlabels*i+l]*dV[kNlabels*i+l]*d2fdv2[kNlabels*i+l];
+        }
+        sum1 *= 0.5; sum2 *= 0.5;
+        Float s1 = 0, s2 = 0;
+        if (lambda > 0) {
+            for (int j=0; j<npoint; ++j) { s1 += p[j]*dU[j]; s2 += dU[j]*dU[j]; }
+            sum1 -= lambda*s1; sum2 += lambda*s2;
+        }
+        if (fabs(sum1) < 1e-13 || !sum2) {
+            printf("Converged for l = %d (sums are %g,%g)\n",l,sum1,sum2);
+            fflush(stdout);
+            isConverged[l] = true;
+            return;
+        }
+        Float t = sum1/sum2;
+        Float Fn = computeF(l,s1,s2,t);
+        Float Fe = F1 - sum1*t;
+        if (Fn > Fe + 1e-6) {
+            Float tn = sum1*t*t/(Fn - F1 + 2*t*sum1);
+            auto Fn1 = computeF(l,s1,s2,tn);
+            if (Fn1 < Fn) { Fn = Fn1; t = tn; }
+            if (Fn > F1 + 1e-4) printf("Oops: l=%d F[l]=%g F1=%g Fn=%g Fn1=%g Fe=%g t=%g, %g\n",l,F[l],F1,Fn,Fn1,Fe,t,tn);
+        }
+        Float sumP2 = 0;
+        for (int j=0; j<npoint; ++j) { p[j] += t*dU[j]; sumP2 += p[j]*p[j]; }
+        for (int i=0; i<ntrain; ++i) V[kNlabels*i+l] += t*dV[kNlabels*i+l];
+        allFn[l] = Fn;
+        allP2[l] = sumP2;
+        isConverged[l] = false;
+        return;
+    };
+
     Float totF, totP2;
     bool allConverged;
-    auto takeStep = [&computeF, &F, &totF, &totP2, &allConverged, &P, &du, &sump2, &V, &dV, &dfdv, &d2fdv2, lambda, ntrain, npoint] () {
+
+    auto takeStep = [&takeStep1label, &totF, &totP2, &workers, &allFn, &allP2, &isConverged, &allConverged] () {
         auto tim1 = std::chrono::steady_clock::now();
-        totF = totP2 = 0;
-        allConverged = true;
-        auto p = P.data(); auto dU = du.data();
-        for (int l=0; l<kNlabels; ++l) {
-            Float F1 = F[l] + lambda*sump2[l];
-            Float sum1 = 0, sum2 = 0;
-            for (int i=0; i<ntrain; ++i) {
-                sum1 -= dV[kNlabels*i+l]*dfdv[kNlabels*i+l];
-                sum2 += dV[kNlabels*i+l]*dV[kNlabels*i+l]*d2fdv2[kNlabels*i+l];
-            }
-            sum1 *= 0.5; sum2 *= 0.5;
-            Float s1 = 0, s2 = 0;
-            if (lambda > 0) {
-                for (int j=0; j<npoint; ++j) { s1 += p[j]*dU[j]; s2 += dU[j]*dU[j]; }
-                sum1 -= lambda*s1; sum2 += lambda*s2;
-            }
-            if (fabs(sum1) < 1e-13 || !sum2) {
-                printf("Converged for l = %d (sums are %g,%g)\n",l,sum1,sum2);
-                fflush(stdout);
-                continue;
-            }
-            allConverged = false;
-            Float t = sum1/sum2;
-            Float Fn = computeF(l,s1,s2,t);
-            Float Fe = F1 - sum1*t;
-            if (Fn > Fe + 1e-6) {
-                Float tn = sum1*t*t/(Fn - F1 + 2*t*sum1);
-                auto Fn1 = computeF(l,s1,s2,tn);
-                if (Fn1 < Fn) { Fn = Fn1; t = tn; }
-                if (Fn > F1 + 1e-4) printf("Oops: l=%d F[l]=%g F1=%g Fn=%g Fn1=%g Fe=%g t=%g, %g\n",l,F[l],F1,Fn,Fn1,Fe,t,tn);
-            }
-            for (int j=0; j<npoint; ++j) { p[j] += t*dU[j]; totP2 += p[j]*p[j]; }
-            for (int i=0; i<ntrain; ++i) V[kNlabels*i+l] += t*dV[kNlabels*i+l];
-            totF += Fn;
-            p += npoint; dU += npoint;
+        if (int(workers.size()) <= kNlabels) {
+            for (int l = 0; l < kNlabels; ++l) workers[l] = std::thread(takeStep1label, l);
+            for (int l = 0; l < kNlabels; ++l) workers[l].join();
+        } else {
+            std::atomic<int> label(0);
+            auto compute = [&label, &takeStep1label] () {
+                while (true) {
+                    int l = label.fetch_add(1);
+                    if (l >= kNlabels) break;
+                    takeStep1label(l);
+                }
+            };
+            for (auto& w : workers) w = std::thread(compute);
+            for (auto& w : workers) w.join();
         }
+        totF = totP2 = 0;
+        for (auto& f : allFn) totF += f;
+        for (auto& p : allP2) totP2 += p;
+        allConverged = true;
+        for (auto c : isConverged) allConverged = allConverged && c;
         auto tim2 = std::chrono::steady_clock::now();
         return (double)std::chrono::duration_cast<std::chrono::microseconds>(tim2-tim1).count();
     };
@@ -367,14 +392,15 @@ int main(int argc, char **argv) {
         }
         auto tNow = std::chrono::steady_clock::now();
         auto time = 1e-6*std::chrono::duration_cast<std::chrono::microseconds>(tNow-tStart).count();
-        printf("  Iteration %d: F=%g(%g) sump2=%g, Ngood=%d,%d,%d  time=%g s\n",
+        printf("  Iteration %3d: F=%g(%g) sump2=%g, Ngood=%d,%d,%d  time=%g s\n",
                 iter+1,totF,totF-lambda*totP2,totP2,ngood,ngood1,ngoodTest,time);
         fflush(stdout);
         auto tim2 = std::chrono::steady_clock::now();
         return (double)std::chrono::duration_cast<std::chrono::microseconds>(tim2-tim1).count();
     };
 
-    auto checkIfConverged = [&totF, &totP2, &Fold, &Fvalues, &nconv, lambda] (int iter) {
+    auto checkIfConverged = [&totF, &totP2, &Fold, &Fvalues, &nconv, &allConverged, lambda] (int iter) {
+        if (allConverged) return true;
         if (Fold/totF-1 < 1e-10) {
             ++nconv;
             if (nconv > 3) {
@@ -403,7 +429,6 @@ int main(int argc, char **argv) {
         if ((iter+1)%20 == 0) {
             totCtime += checkResults(iter);
         }
-        if (allConverged) break;
         if (checkIfConverged(iter)) break;
     }
 
