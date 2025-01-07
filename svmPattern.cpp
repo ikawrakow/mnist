@@ -47,7 +47,7 @@ std::vector<uint8_t> Pattern::apply(int Nx, int Ny, const std::vector<uint8_t>& 
 }
 
 namespace {
-// 12,000 points. 0.9945 with elastic, lambda = 20
+// 12,000 points. 0.9950 with 19 affine, lambda = 10, nhist=100 (converges after 220 iterations)
 std::vector<Pattern> getPatternsV0() {
     std::vector<Pattern> result;
     Pattern p1;

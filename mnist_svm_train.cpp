@@ -156,7 +156,8 @@ int main(int argc, char **argv) {
     int    type   = argc > iarg ? atoi(argv[iarg++]) : 0;
     auto   ofile  = argc > iarg ? argv[iarg++]       : "test.dat";
     int    rseq   = argc > iarg ? atoi(argv[iarg++]) : 0;
-    int    nhist  = argc > iarg ? atoi(argv[iarg++]) : 10;
+    int    nhist  = argc > iarg ? atoi(argv[iarg++]) : 100;
+    float  max_t  = argc > iarg ? atof(argv[iarg++]) : 0.05f;
 
     auto labels = getTraningLabels();
     if (labels.size() != kNtrain) return 1;
@@ -176,7 +177,7 @@ int main(int argc, char **argv) {
             nadd -= 100;
             auto images1 = images; auto labels1 = labels;
             addElasticDeformations(images,labels,nadd);
-            addAffineTransformations(kNx,kNy,images1,labels1,nadd+1,12.,0.6,0.1,0.05,0.05,0,false);
+            addAffineTransformations(kNx,kNy,images1,labels1,nadd+1,12.,0.6,0.1,max_t,max_t,0,false);
             auto curSize = images.size();
             images.resize(images.size() + images1.size() - kNtrain*kSize);
             std::copy(images1.begin() + kNtrain*kSize, images1.end(), images.begin() + curSize);
@@ -186,7 +187,7 @@ int main(int argc, char **argv) {
         }
     }
     else if (nadd < 0) {
-        addAffineTransformations(kNx,kNy,images,labels,-nadd,12.,0.6,0.1,0.05,0.05,rseq,false);
+        addAffineTransformations(kNx,kNy,images,labels,-nadd,12.,0.6,0.1,max_t,max_t,rseq,false);
     }
     int ntrain = labels.size();
 
@@ -277,7 +278,7 @@ int main(int argc, char **argv) {
                 Float tn = sum1*t*t/(Fn - F1 + 2*t*sum1);
                 auto Fn1 = computeF(l,s1,s2,tn);
                 if (Fn1 < Fn) { Fn = Fn1; t = tn; }
-                if (Fn > F1) printf("Oops: l=%d F[l]=%g Fn=%g Fe=%g t=%g, %g\n",l,F[l],Fn,Fe,t,tn);
+                if (Fn > F1 + 1e-4) printf("Oops: l=%d F[l]=%g F1=%g Fn=%g Fn1=%g Fe=%g t=%g, %g\n",l,F[l],F1,Fn,Fn1,Fe,t,tn);
             }
             for (int j=0; j<npoint; ++j) { p[j] += t*dU[j]; totP2 += p[j]*p[j]; }
             for (int i=0; i<ntrain; ++i) V[kNlabels*i+l] += t*dV[kNlabels*i+l];
