@@ -13,6 +13,10 @@
 #include <fstream>
 #include <limits>
 
+#ifdef __ARM_NEON
+#include <arm_neon.h>
+#endif
+
 template <typename Float>
 double computeFdF(Float norm, const std::vector<uint8_t>& labels, const std::vector<Float>& V,
         std::vector<Float>& dfdv, std::vector<Float>& d2fdv2, std::vector<Float>& F) {
@@ -90,7 +94,7 @@ double computeVfast(const std::vector<uint8_t>& dImage, std::vector<Float>& dv, 
         }
         u += npoint; iu += npoint;
     }
-    int nthread = 1 + workers.size();
+    int nthread = workers.size();
     int chunk1 = nimage/(8*nthread);
     int chunk = 16; while (chunk < chunk1) chunk *= 2;
     std::atomic<int> counter(0);
@@ -106,6 +110,34 @@ double computeVfast(const std::vector<uint8_t>& dImage, std::vector<Float>& dv, 
                 auto u = ui.data();
                 for (int l=0; l<kNlabels; ++l) {
                     int64_t s = 0; auto a = A;
+#ifdef __ARM_NEON
+                    float32x4_t sumf = vdupq_n_f32(0.f);
+                    float32x4_t vs = vdupq_n_f32(scaleI[l]);
+                    for (int i128=0; i128<n128; ++i128) {
+                        int32x4_t vsum1 = vdupq_n_s32(0);
+                        int32x4_t vsum2 = vdupq_n_s32(0);
+                        for (int k=0; k<16; ++k) {
+                            auto vu = vld1q_s16(u + 8*k);
+                            auto va = vreinterpretq_s8_u8(vmovl_u8(vld1_u8(a + 8*k)));
+                            vsum1 = vmlal_s16(vsum1, vget_low_s16 (vu), vget_low_s16 (va));
+                            vsum2 = vmlal_s16(vsum2, vget_high_s16(vu), vget_high_s16(va));
+                        }
+                        a += 128; u += 128;
+                        sumf = vfmaq_f32(sumf, vs, vcvtq_f32_s32(vaddq_s32(vsum1, vsum2)));
+                    }
+                    int32x4_t vsum1 = vdupq_n_s32(0);
+                    int32x4_t vsum2 = vdupq_n_s32(0);
+                    for (int k=0; k<nn/8; ++k) {
+                        auto vu = vld1q_s16(u + 8*k);
+                        auto va = vreinterpretq_s8_u8(vmovl_u8(vld1_u8(a + 8*k)));
+                        vsum1 = vmlal_s16(vsum1, vget_low_s16(vu), vget_low_s16(va));
+                        vsum2 = vmlal_s16(vsum2, vget_high_s16(vu), vget_high_s16(va));
+                    }
+                    sumf = vfmaq_f32(sumf, vs, vcvtq_f32_s32(vaddq_s32(vsum1, vsum2)));
+                    int si = 0; for (int k=8*(nn/8); k < nn; ++k) si += u[k] * a[k];
+                    a += nn; u += nn;
+                    dv[kNlabels*i+l] = vaddvq_f32(sumf) + scaleI[l]*si;
+#else
                     for (int i128=0; i128<n128; ++i128) {
                         int si = 0; for (int k=0; k<128; ++k) si += (int)u[k] * a[k];
                         s += si; a += 128; u += 128;
@@ -114,6 +146,7 @@ double computeVfast(const std::vector<uint8_t>& dImage, std::vector<Float>& dv, 
                     s += si;
                     a += nn; u += nn;
                     dv[kNlabels*i+l] = scaleI[l]*s;
+#endif
                 }
                 A += npoint;
             }
