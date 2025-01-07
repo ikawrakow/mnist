@@ -1,8 +1,12 @@
 # Recognizing hand-written digits the old fashioned way
 
-### Why?
+### TL;DR
 
-The other day @Nexesenex [was asking](https://github.com/ikawrakow/ik_llama.cpp/issues/133) to update [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) to the latest version of [llama.cpp](https://github.com/ggerganov/llama.cpp). Looking into the @Nexesenex' issue I noticed that there are now efforts to turn [ggml](https://github.com/ggerganov/ggml) into an actual machine learning rather than just an inferrence library, and that there is now a `ggml` [mnist example](https://github.com/ggerganov/ggml/tree/master/examples/mnist) showing how to train simple networks to recognize hand-written digits from the classic [MNIST database](https://yann.lecun.com/exdb/mnist/), which reminded me that many years ago I had experimented with `mnist`. After some searching in old backups I found the code and decided to put here the simple k-nearest-neigbor (kNN) approach I had developed.
+This repository contains [k-nearest-neighbors](https://en.wikipedia.org/wiki/K-nearest_neighbors_algorithm) (kNN) and [support vector machine](https://en.wikipedia.org/wiki/Support_vector_machine) (SVM) algorithms for recognizing hand-written digits from the [MNIST database](https://yann.lecun.com/exdb/mnist/).
+
+kNN and SVM and not a neural network in the year 2025? Seriously?
+
+I know. But the other day @Nexesenex [was asking](https://github.com/ikawrakow/ik_llama.cpp/issues/133) to update [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) to the latest version of [llama.cpp](https://github.com/ggerganov/llama.cpp). Looking into the @Nexesenex' issue I noticed that there are now efforts to turn [ggml](https://github.com/ggerganov/ggml) into an actual machine learning rather than just an inferrence library, and that there is now a `ggml` [mnist example](https://github.com/ggerganov/ggml/tree/master/examples/mnist) showing how to train simple networks to recognize hand-written digits from the classic [MNIST database](https://yann.lecun.com/exdb/mnist/), which reminded me that many years ago I had experimented with `mnist`. After some searching in old backups I found the code and decided to put here kNN and SVM approaches I had developed. The best of the kNN algorithms arrives at a prediction eror of 0.61%. The SVM algorithm reaches 0.38%. As far as I can tell, these results are nearly SOTA or SOTA for the respective algorithm type (I haven't done any extended literature search, so these claims are based on what I see on the Wikipedia [mnist entry](https://en.wikipedia.org/wiki/MNIST_database), so I may be wrong).   
 
 ### Usage
 
@@ -12,6 +16,9 @@ git clone git@github.com:ikawrakow/mnist.git
 cd mnist
 cmake .
 make -j
+```
+To run one of the kNN algorithms,
+```
 ./mnist_knn_vX
 ```
 whete `X` is `1...4` for the 4 versions discussed below. This will "train" the model (no actual training is required for a kNN model, but some versions will add augmented data, see below) and predict that 10,000 `mnist` test images. For convenience, the `mnist` training and test datasets in the `data` subfolder of this repository (required `git-lfs`). This will produce output such as
@@ -42,7 +49,60 @@ neighbors | error (%)
     19    |  3.200
     20    |  3.160
 ```
-that shows the error rate (fraction of mispredicted digits) as a function of the number of nearest neighbors used. I prefer to use the prediction error rather than the prediction accuracy as it better shows the performance of the algorithm (a prediction accuracy of 99% does not feel that much different from 98%, but when looking at error rate, 1% is 2 times between than 2%).   
+that shows the error rate (fraction of mispredicted digits) as a function of the number of nearest neighbors used. I prefer to use the prediction error rather than the prediction accuracy as it better shows the performance of the algorithm (a prediction accuracy of 99% does not feel that much different from 98%, but when looking at error rate, 1% is 2 times between than 2%).
+
+The SVM algorith must first be trained. For a quick example
+```
+> ./mnist_svm_train 200 0 100
+Pattern::apply: nimage=60000 np=24 Nx=28 Ny=28 Nx1=24 Ny1=24 Nx2=12 Ny2=12
+Pattern::apply: nimage=10000 np=24 Nx=28 Ny=28 Nx1=24 Ny1=24 Nx2=12 Ny2=12
+Pattern::apply: nimage=1440000 np=20 Nx=12 Ny=12 Nx1=10 Ny1=10 Nx2=5 Ny2=5
+Pattern::apply: nimage=240000 np=20 Nx=12 Ny=12 Nx1=10 Ny1=10 Nx2=5 Ny2=5
+12000 points per image
+Using chunk=128
+  Iteration  10: F=2.367736(2.325747) sump2=0.00041989, Ngood=58684,58684,9793  time=0.452434 s
+  Iteration  20: F=1.129476(0.974787) sump2=0.00154688, Ngood=59498,59498,9885  time=0.747391 s
+  Iteration  40: F=0.762469(0.461445) sump2=0.00301025, Ngood=59847,59847,9917  time=1.33499 s
+  Iteration  60: F=0.737481(0.411337) sump2=0.00326144, Ngood=59877,59877,9923  time=2.00638 s
+  Iteration  80: F=0.735779(0.407476) sump2=0.00328304, Ngood=59881,59881,9922  time=2.76658 s
+  Iteration 100: F=0.735688(0.407481) sump2=0.00328207, Ngood=59880,59880,9922  time=3.60235 s
+  Iteration 120: F=0.735685(0.407511) sump2=0.00328174, Ngood=59880,59880,9922  time=4.4851 s
+Terminating due to too small change (9.75132e-05) in the last 50 iterations
+Total time: 4990.98 ms, I-time: 9.299 ms, F-time: 124.97 ms, S-time: 1672.43 ms, U-time: 229.702 ms, V-time: 1673.31 ms, P-time: 1052.07 ms, C-time: 228.644 ms
+Training: ngood = 59880 (0.998)  59880 (0.998)
+0  9922
+1  9988
+2  9995
+3  9999
+4  10000
+Wrote training results to test.dat
+```
+we get 0.9922 accuracy (0.78% prediction error) after 5 seconds of training. To run prediction with the just trained model written to `test.dat`
+```
+./mnist_svm_predict test.dat
+============================== Dataset test.dat
+Pattern::apply: nimage=10000 np=24 Nx=28 Ny=28 Nx1=24 Ny1=24 Nx2=12 Ny2=12
+Pattern::apply: nimage=240000 np=20 Nx=12 Ny=12 Nx1=10 Ny1=10 Nx2=5 Ny2=5
+# 12000 points per image
+Predicted 10000 images in 103.289 ms -> 10.3289 us per image
+
+0  9922
+1  9988
+2  9995
+3  9999
+4  10000
+Confidence levels:
+0.25:  9882 out of 9937 (0.994465)
+0.50:  9836 out of 9874 (0.996152)
+0.75:  9780 out of 9807 (0.997247)
+1.00:  9682 out of 9699 (0.998247)
+1.25:  9582 out of 9592 (0.998957)
+1.50:  9425 out of 9430 (0.99947)
+2.00:  9010 out of 9010 (1)
+```
+See below for more details
+
+## kNN
 
 ### V1
 
@@ -102,4 +162,89 @@ An error rate of 0.61% is nearly SOTA for kNN. As far as I can tell, [this paper
 
 ![v4](https://github.com/user-attachments/assets/7cc164e4-f563-40f2-b6b8-28044f1f2e7f)
 
+## SVM
 
+### Algorithm description
+
+To train an SVM algorithm that recognizes a given digit $l$, one looks for a plane $B^l_j$ in an $N$ dimensional "image feature" space such that $y_{li} \sum B^l_j A_{ij} > 0$, where $A_{ij}$ are the "features" of image $i$, and $y_{li} = +1$ when the image is digit $l$ or $y_{il} = -1$ otherwise. The simplest possible set of "features" in the context of `mnist` would simply the $28^2 = 784$ image grey values. One does not get very far with this, so here we prepare a feature set for an image by
+1. Let $G_j$ be the grey values of an image (`uint8_t` in the range `0...255` for `mnist`)
+2. Let $\Delta_1$ and $\Delta_2$ be offsets relative to an image pixel ($\Delta_1 \neq \Delta_2$)
+3. Let $O(j, \Delta_1, \Delta_2) = G_{j+\Delta_1} - G_{j+\Delta_2}$, if $G_{j+\Delta_1} \geq G_{j+\Delta_2}, O(j, \Delta_1, \Delta_2) = 0$ otherwise
+4. Applying $O(j, \Delta_1, \Delta_2)$ to every pixel $j$ in a given image creates a new image. We say that we applied "pattern" $(\Delta_1, \Delta_2)$ to the image. This is somewhat like applying a convolutional kernel in a CNN, except that our kernels are not "learned" but consists of truncated differences between pixels at pre-determined offsets 
+1. Apply $N_1$ different "patterns" to the original image
+2. Downsample the resulting $N_1$ images by averaging (typically using `2x2` windows)
+3. Apply $N_2$ different "patterns" to the $N_1$ downsampled images. We now have $N_1 \cdot N_2$ images
+4. Downsample the $N_1 \cdot N_2$ images using averaging
+5. Possibly apply $N_3$ different "patterns" to the $N_1 \cdot N_2$ downsampled images
+6. ...   
+
+Depending on $N_1, N_2, ...$, we end up with a given number of values $A_{ij}$ that are the "features" of image $i$. This is implemented in `svmPattern.h` and `svmPattern.cpp`.
+
+To determine the plane coefficients $B^l_j$ the following optimization objective, which we will minimize, is used 
+
+$$F = \sum_{l=0}^9~~\sum_{i=1}^{N_t} \left(1 - y_{li} V_{li} \right)^2 \Theta\left(1 - y_{li} V_{li}\right) + \lambda \sum_{l=0}^9~~\sum_{j=1}^N \left(B^l_j\right)^2$$
+
+where
+
+$$V_{li} = \sum_{j=1}^N B^l_j A_{ij}$$
+
+Here $N_t$ is the number of training examples, $N$ is the number of features, $\Theta$ is the Heaviside step function, and we have added a [Tikhonov regularization](https://en.wikipedia.org/wiki/Ridge_regression) term proprtional to $\lambda$ to (hopefully) reduce overfitting. There are $10 \cdot N$ free parameters. This is a slight departure from a classic SVM as we are aiming for a gap of $\pm 1$, which I think works slightly better for this particular dataset.
+
+[L-BFGS](https://en.wikipedia.org/wiki/Limited-memory_BFGS) is used to minimize $F$, see `bfgs.h` and `bfgs.cpp`.
+
+### Data augmentation
+
+As with kNN, it is useful to add augmented data to the training set. Unlike kNN, where elastic deformations are used, here affine transformations of the original `mnist` dataset work better. Random rotation angles in $\pm 12.5$ degrees, sheering in $\pm 0.6$, and translations within $\pm 1.4$ pixels are sampled to compose the affine transformations.
+
+### Patterns
+
+There are 4 patterns provided
+* Type "0" results in 12,000 features
+* Type "1" has 16,000 features
+* Type "2" has 30,720 features
+* Type "3" has 38,400 features
+* Type "4" has 57,600 features
+
+We will focus on Type "0" and Type "4", the others are there just for experimentations.
+
+### Training
+
+The training code takes several command line parameters:
+```
+./mnist_svm_train num_iterations n_add lambda type output_file random_sequence n_history max_translation
+```
+where
+* `num_iterations` is the maximum number of iterations to run. It is set by default to 200, but one should typically use more. If convergence is reached, the iteration will be terminated.
+* `n_add` is the number of augmented images to add per original `mnist` image. Note, however, that this is very hacky: if `n_add > 0`, `n_add` elasticly deformed images will be added. If `n_add < 0` (which one should always use), `-n_add` affine-transformed images will be added. If `n_add > 100`, then `n_add - 100` elastic deformations **and** `n_add - 99` affine transfromations will be added. A big caveat is that I have not bothered implementing batching, so all augmented images are added, and the features are computed and held in RAM. This puts a limit on how much augmented data one can add (depending on RAM available). E.g., with 9 added affine transformations,one has 600,000 images, so 7.2 GB of RAM are needed for Type "0" pattern and 34.6 GB for the Type "4" pattern.
+* `lambda` is the Tikhonov regularization parameter. There is no precise science behind this, so determining good values is a matter of experimentation. Typically `lambda` should be in the ranhe `10...100`
+* `type` is the pattern type, so 0...4
+* `output_file` is the file name to use to store the trained model. If missing, `test.dat` is used
+* `random_sequence` is the random number sequence to use (for the random number generator used to generate random deformations and affine transformations). Should be left at zero, unless one wants to experiment with training multiple models using different sets of added augmented data, and then to combine the results somehow
+* `n_history` is the number of past iterations to keep in the L-BFGS history. 100 is a good value for this
+* `max_translation` is the macximum translation contained in affine transformations expressed as a fraction of the image size. 0.05 is the default value (so 1.4 pixels).
+
+To very quickly train a model:
+```
+./mnist_svm_train 200 0 100 fast_model.dat"
+```
+No augmented data will be added. Run time is about 5 seconds on my Ryzen-7950X CPU and results in a model with a prediction error of 0.78%. Because we did not add any additional data, it is necessary to use a larger `lambda` (100 in this case) to avoid overfoitting.
+
+To train a small, but quite accurate model:
+```
+./mnist_svm_train 400 -19 10 small_model.dat 0 100 0.075
+```
+This will add 19 affine transformations, so we have 1.2 million training samples for 12,000 free parameters. Hence, `lambda` can be relatively small (10 in this case). This runs in 112 seconds and produces a model with an error rate of 0.5%.
+
+To train the most accurate model (128+ GB of RAM required):
+```
+./mnist_svm_train 400 -29 50 large_model.dat 0 100
+```
+This runs in about 428 seconds on a Ryzen-5975WX and produces a model with an error rate of 0.38%.
+
+### Prediction
+
+```
+./mnist_svm_predict model_file
+```
+This will predict the 10,000 test images from the `mnist` database and will print some statistics about the results.
+Prediction time is about 10.5 us/image for the small model (12,000 features), and about 45 us/image for the large model (57,600 features). 
