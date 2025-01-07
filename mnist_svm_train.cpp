@@ -392,7 +392,7 @@ int main(int argc, char **argv) {
         }
         auto tNow = std::chrono::steady_clock::now();
         auto time = 1e-6*std::chrono::duration_cast<std::chrono::microseconds>(tNow-tStart).count();
-        printf("  Iteration %3d: F=%g(%g) sump2=%g, Ngood=%d,%d,%d  time=%g s\n",
+        printf("  Iteration %3d: F=%8.6f(%8.6f) sump2=%.8f, Ngood=%d,%d,%d  time=%g s\n",
                 iter+1,totF,totF-lambda*totP2,totP2,ngood,ngood1,ngoodTest,time);
         fflush(stdout);
         auto tim2 = std::chrono::steady_clock::now();
@@ -426,7 +426,7 @@ int main(int argc, char **argv) {
         totStime += setSearchDirection();
         totVtime += computeVfast(images,dV,du,ui,npoint,ntrain,workers);
         totUtime += takeStep();
-        if ((iter+1)%20 == 0) {
+        if (iter == 9 || (iter+1)%20 == 0) {
             totCtime += checkResults(iter);
         }
         if (checkIfConverged(iter)) break;
