@@ -243,8 +243,6 @@ int main(int argc, char **argv) {
     Float Fold = std::numeric_limits<Float>::max();
     double totTime = 0, totItime = 0, totFtime = 0, totStime = 0, totUtime, totPtime = 0, totVtime = 0, totCtime = 0;
 
-    std::vector<Float> bestP(kNlabels*npoint,0);
-    int bestNgood = 0;
     int nconv = 0;
 
     auto setSearchDirection = [&bfgs, &F, &P, &dP, &du, npoint] () {
@@ -372,7 +370,7 @@ int main(int argc, char **argv) {
 
     auto tStart = std::chrono::steady_clock::now();
 
-    auto checkResults = [&predictTest, &P, &V, &labels, &bestP, &bestNgood, &patterns, &totF, &totP2, &workers,
+    auto checkResults = [&predictTest, &P, &V, &labels, &patterns, &totF, &totP2, &workers,
          npoint, ntrain, lambda, tStart, ofile] (int iter) {
         auto tim1 = std::chrono::steady_clock::now();
         int ngoodTest = predictTest();
@@ -385,11 +383,7 @@ int main(int argc, char **argv) {
                 if (i < kNtrain) ++ngood1;
             }
         }
-        if (ngoodTest >= bestNgood) {
-            bestNgood = ngoodTest;
-            bestP = P;
-            writeResults(ofile,npoint,patterns,bestP);
-        }
+        writeResults(ofile,npoint,patterns,P);
         auto tNow = std::chrono::steady_clock::now();
         auto time = 1e-6*std::chrono::duration_cast<std::chrono::microseconds>(tNow-tStart).count();
         printf("  Iteration %3d: F=%8.6f(%8.6f) sump2=%.8f, Ngood=%d,%d,%d  time=%g s\n",
@@ -475,7 +469,7 @@ int main(int argc, char **argv) {
     }
     for (int n=0; n<ncheck; ++n) printf("%d  %d\n",n,Ngood[n]);
 
-    writeResults(ofile,npoint,patterns,bestP,true);
+    writeResults(ofile,npoint,patterns,P,true);
 
     return 0;
 }

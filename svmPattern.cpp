@@ -19,7 +19,7 @@ std::vector<uint8_t> Pattern::apply(int Nx, int Ny, const std::vector<uint8_t>& 
         else { Nx2 = Nx1 + Ny1; Ny2 = 1; }
     }
     std::vector<uint8_t> result(Nx2*Ny2*np*nimage);
-    printf("%s: nimage=%d np=%d Nx=%d Ny=%d Nx1=%d Ny1=%d Nx2=%d Ny2=%d\n",__func__,(int)nimage,np,Nx,Ny,Nx1,Ny1,Nx2,Ny2);
+    printf("Pattern::%s: nimage=%d np=%d Nx=%d Ny=%d Nx1=%d Ny1=%d Nx2=%d Ny2=%d\n",__func__,(int)nimage,np,Nx,Ny,Nx1,Ny1,Nx2,Ny2);
     fflush(stdout);
     std::atomic<int64_t> counter(0); int chunk = 64;
     auto compute = [&counter, &images, &pattern, &result, Nx, Ny, Nx1, Ny1, Nx2, Ny2, np, nimage, chunk]() {
