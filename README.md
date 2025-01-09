@@ -272,12 +272,12 @@ Prediction time is about 10 us/image for the small model (12,000 features), and 
 
 The digit for test image $i$ is predicted by
 * Computing the image features $A_{ij}$ according to the trained patterns
-* Computing $V_^l_i = \sum B^l_j A_{ij}$ for $l = 0 ... 9$
+* Computing $V^l_i = \sum B^l_j A_{ij}$ for $l = 0 ... 9$
 * Using as prediction the $l$ for which $V^l_i$ is maximum
 
-In the above output the 5 outputs `X Y` show how many times the correct result was in the top $V^l_i$ (`0 9922`), in the top 2 $V^l_i$ (` 9988`, etc.
+In the above output the 5 outputs `X Y` show how many times the correct result was in the top $V^l_i$ (`0 9922`), in the top 2 $V^l_i$ (`1 9988`), etc.
 
-We can consider the difference between the highest and second highest $V^l_i$ as a measure of prediction confidence. The output following `Confidence levels:` provides some statistics related to that. For instance, if this difference is greater than `0.5`, the prediction accuracy would be `0.996152` (but we would be predicting 98.74% of the images). If we only provided prediction when the difference is greater than 2, then prediction accuracy would be 100% (but we would reject about 10% of the images).
+We can consider the difference between the highest and second highest $V^l_i$ as a measure of prediction confidence. The output following `Confidence levels:` provides some statistics related to that. For instance, if this difference is greater than `0.5` in the above output, the prediction accuracy would be `0.996152` (but we would be predicting 98.74% of the images). If we only provided prediction when the difference is greater than 2, then prediction accuracy would be 100% (but we would reject about 10% of the images).
 
 In comparison, the output of the most accurate SVM model:
 ```
@@ -302,4 +302,4 @@ Confidence levels:
 1.50:  9722 out of 9723 (0.999897)
 2.00:  9515 out of 9515 (1)
 ```
-Base accuracy is 0.9962. If we rejected 0.89% of the images by requiring that the cofidence is greater than 0.75, prediction accuracy would be 0.9984.
+Base accuracy is 0.9962. If we rejected 0.89% of the images by requiring that the confidence is greater than 0.75, prediction accuracy would be 0.9984.
