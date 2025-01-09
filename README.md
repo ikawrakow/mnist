@@ -19,11 +19,11 @@ make -j
 ```
 To run one of the kNN algorithms,
 ```
-./mnist_knn_vX
+./bin/mnist_knn_vX
 ```
 where `X` is `1...4` for the 4 versions discussed below. This will "train" the model (no actual training is required for a kNN model, but some versions will add augmented data, see below) and predict that 10,000 `mnist` test images. For convenience, the `mnist` training and test datasets in the `data` sub-folder of this repository (required `git-lfs`). This will produce output such as
 ```
-> ./mnist_knn_v1
+> ./bin/mnist_knn_v1
 Predicting 10000 test images...done in 1498.61 ms -> 0.149861 ms per image
 
 neighbors | error (%)
@@ -53,7 +53,7 @@ that shows the error rate (fraction of mispredicted digits) as a function of the
 
 The SVM algorithm must first be trained. For a quick example
 ```
-> ./mnist_svm_train 200 0 100
+> ./bin/mnist_svm_train 200 0 100
 Pattern::apply: nimage=60000 np=24 Nx=28 Ny=28 Nx1=24 Ny1=24 Nx2=12 Ny2=12
 Pattern::apply: nimage=10000 np=24 Nx=28 Ny=28 Nx1=24 Ny1=24 Nx2=12 Ny2=12
 Pattern::apply: nimage=1440000 np=20 Nx=12 Ny=12 Nx1=10 Ny1=10 Nx2=5 Ny2=5
@@ -79,7 +79,7 @@ Wrote training results to test.dat
 ```
 we get 0.9922 accuracy (0.78% prediction error) after 5 seconds of training. To run prediction with the just trained model written to `test.dat`
 ```
-./mnist_svm_predict test.dat
+./bin/mnist_svm_predict test.dat
 ============================== Dataset test.dat
 Pattern::apply: nimage=10000 np=24 Nx=28 Ny=28 Nx1=24 Ny1=24 Nx2=12 Ny2=12
 Pattern::apply: nimage=240000 np=20 Nx=12 Ny=12 Nx1=10 Ny1=10 Nx2=5 Ny2=5
@@ -136,7 +136,7 @@ We have learned that adding translated and deformed versions of the training dat
 
 The resulting algorithm can be found in `mnist_knn_v4.cpp`. It is more complicated than the very simple `mnist_knn_v1-3.cpp`, but still reasonably simple with less than 300 LOC. `mnist_knn_v4` has several command-line options that influence the prediction accuracy vs run time tradeoff. Usage is
 ```
-./mnist_knn_v4 [num_neighbors] [n_add] [thresh] [speed] [beta] [nthread]
+./bin/mnist_knn_v4 [num_neighbors] [n_add] [thresh] [speed] [beta] [nthread]
 ```
 where
 * `num_neighbors` is the number of nearest neighbors to use. This affects run-time/accuracy because there are checks from time to time if all `4 * num_neighbors` nearest neighbors predict the same label and, if so, the calculation is stopped and the corresponding label (digit) is returned as the predicted result. Default value is 5.
@@ -211,7 +211,7 @@ We will focus on Type "0" and Type "4", the others are there just for experiment
 
 The training code takes several command line parameters:
 ```
-./mnist_svm_train num_iterations n_add lambda type output_file random_sequence n_history max_translation
+./bin/mnist_svm_train num_iterations n_add lambda type output_file random_sequence n_history max_translation
 ```
 where
 * `num_iterations` is the maximum number of iterations to run. It is set by default to 200, but one should typically use more. If convergence is reached, the iteration will be terminated.
@@ -225,26 +225,26 @@ where
 
 To very quickly train a model:
 ```
-./mnist_svm_train 200 0 100 fast_model.dat"
+./bin/mnist_svm_train 200 0 100 fast_model.dat"
 ```
 No augmented data will be added. Run time is about 5 seconds on my Ryzen-7950X CPU and results in a model with a prediction error of 0.78%. Because we did not add any additional data, it is necessary to use a larger `lambda` (100 in this case) to avoid overfitting.
 
 To train a small, but quite accurate model:
 ```
-./mnist_svm_train 400 -19 10 small_model.dat 0 100 0.075
+./bin/mnist_svm_train 400 -19 10 small_model.dat 0 100 0.075
 ```
 This will add 19 Affine transformations, so we have 1.2 million training samples for 12,000 free parameters. Hence, `lambda` can be relatively small (10 in this case). This runs in 112 seconds and produces a model with an error rate of 0.5%.
 
 To train the most accurate model (128+ GB of RAM required):
 ```
-./mnist_svm_train 400 -29 50 large_model.dat 0 100
+./bin/mnist_svm_train 400 -29 50 large_model.dat 0 100
 ```
 This runs in about 428 seconds on a Ryzen-5975WX and produces a model with an error rate of 0.38%.
 
 ### Prediction
 
 ```
-./mnist_svm_predict model_file
+./bin/mnist_svm_predict model_file
 
 ============================== Dataset test.dat
 Pattern::apply: nimage=10000 np=24 Nx=28 Ny=28 Nx1=24 Ny1=24 Nx2=12 Ny2=12
