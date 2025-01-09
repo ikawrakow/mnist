@@ -146,7 +146,7 @@ where
 * `beta` is a parameter that determines the relative importance of the Pearson correlation coefficient and the binary feature similarity described above. It should be left at its default value of 1.
 * `nthread` is the number of threads to use. If missing, `std::thread::hardware_concurrency()` is used. On systems with hyper-threading enabled or systems with a mix of performance and efficiency cores one may want to specify it explicitly to see if performance can be improved.
 
-Here are some examples of 
+Here are some examples of run times and prediction error for different command line arguments
 | num_neighbors | n_add | thresh | speed | prediction time (ms) | prediction error (%) |
 | ---: | ---: | ---: | ---: | ---: | ---: |
 | 2 | 0 | 0.25 | 2 | 0.05 | 1.91 |
@@ -166,7 +166,7 @@ An error rate of 0.61% is nearly SOTA for kNN. As far as I can tell, [this paper
 
 ### Algorithm description
 
-To train an SVM algorithm that recognizes a given digit $l$, one looks for a plane $B^l_j$ in an $N$ dimensional "image feature" space such that $y_{li} \sum B^l_j A_{ij} > 0$, where $A_{ij}$ are the "features" of image $i$, and $y_{li} = +1$ when the image is digit $l$ or $y_{il} = -1$ otherwise. The simplest possible set of "features" in the context of `mnist` would simply the $28^2 = 784$ image grey values. One does not get very far with this, so here we prepare a feature set for an image by
+To train an SVM algorithm that recognizes a given digit $l$, one looks for a plane $B^l_j$ in an $N$ dimensional "image feature" space such that $y^l_i \sum B^l_j A_{ij} > 0$, where $A_{ij}$ are the "features" of image $i$, and $y^l_i = +1$ when the image is digit $l$ or $y^l_i = -1$ otherwise. The simplest possible set of "features" in the context of `mnist` would simply the $28^2 = 784$ image grey values. One does not get very far with this, so here we prepare a feature set for an image by
 1. Let $G_j$ be the grey values of an image (`uint8_t` in the range `0...255` for `mnist`)
 2. Let $\Delta_1$ and $\Delta_2$ be offsets relative to an image pixel ($\Delta_1 \neq \Delta_2$)
 3. Let $O(j, \Delta_1, \Delta_2) = G_{j+\Delta_1} - G_{j+\Delta_2}$, if $G_{j+\Delta_1} \geq G_{j+\Delta_2}, O(j, \Delta_1, \Delta_2) = 0$ otherwise
@@ -180,13 +180,13 @@ To train an SVM algorithm that recognizes a given digit $l$, one looks for a pla
 
 Depending on $N_1, N_2, ...$, we end up with a given number of values $A_{ij}$ that are the "features" of image $i$. This is implemented in `svmPattern.h` and `svmPattern.cpp`.
 
-To determine the plane coefficients $B^l_j$ the following optimization objective, which we will minimize, is used 
+To determine the plane coefficients $B^l_j$ the following optimization objective, which we will minimize, is used
 
-$$F = \sum_{l=0}^9~~\sum_{i=1}^{N_t} \left(1 - y_{li} V_{li} \right)^2 \Theta\left(1 - y_{li} V_{li}\right) + \lambda \sum_{l=0}^9~~\sum_{j=1}^N \left(B^l_j\right)^2$$
+$$F = \sum_{l=0}^9~~\sum_{i=1}^{N_t} \left(1 - y^l_i V^l_i \right)^2 \Theta\left(1 - y^l_i V^l_i\right) + \lambda \sum_{l=0}^9~~\sum_{j=1}^N \left(B^l_j\right)^2$$
 
 where
 
-$$V_{li} = \sum_{j=1}^N B^l_j A_{ij}$$
+$$V^l_i = \sum_{j=1}^N B^l_j A_{ij}$$
 
 Here $N_t$ is the number of training examples, $N$ is the number of features, $\Theta$ is the Heaviside step function, and we have added a [Tikhonov regularization](https://en.wikipedia.org/wiki/Ridge_regression) term proportional to $\lambda$ to (hopefully) reduce overfitting. There are $10 \cdot N$ free parameters. This is a slight departure from a classic SVM as we are aiming for a gap of $\pm 1$, which I think works slightly better for this particular dataset.
 
@@ -245,6 +245,61 @@ This runs in about 428 seconds on a Ryzen-5975WX and produces a model with an er
 
 ```
 ./mnist_svm_predict model_file
+
+============================== Dataset test.dat
+Pattern::apply: nimage=10000 np=24 Nx=28 Ny=28 Nx1=24 Ny1=24 Nx2=12 Ny2=12
+Pattern::apply: nimage=240000 np=20 Nx=12 Ny=12 Nx1=10 Ny1=10 Nx2=5 Ny2=5
+# 12000 points per image
+Predicted 10000 images in 96.764 ms -> 9.6764 us per image
+
+0  9922
+1  9988
+2  9995
+3  9999
+4  10000
+Confidence levels:
+0.25:  9882 out of 9937 (0.994465)
+0.50:  9836 out of 9874 (0.996152)
+0.75:  9780 out of 9807 (0.997247)
+1.00:  9682 out of 9699 (0.998247)
+1.25:  9582 out of 9592 (0.998957)
+1.50:  9425 out of 9430 (0.99947)
+2.00:  9010 out of 9010 (1)
+
 ```
 This will predict the 10,000 test images from the `mnist` database and will print some statistics about the results.
-Prediction time is about 10.5 us/image for the small model (12,000 features), and about 45 us/image for the large model (57,600 features). 
+Prediction time is about 10 us/image for the small model (12,000 features), and about 45 us/image for the large model (57,600 features).
+
+The digit for test image $i$ is predicted by
+* Computing the image features $A_{ij}$ according to the trained patterns
+* Computing $V_^l_i = \sum B^l_j A_{ij}$ for $l = 0 ... 9$
+* Using as prediction the $l$ for which $V^l_i$ is maximum
+
+In the above output the 5 outputs `X Y` show how many times the correct result was in the top $V^l_i$ (`0 9922`), in the top 2 $V^l_i$ (` 9988`, etc.
+
+We can consider the difference between the highest and second highest $V^l_i$ as a measure of prediction confidence. The output following `Confidence levels:` provides some statistics related to that. For instance, if this difference is greater than `0.5`, the prediction accuracy would be `0.996152` (but we would be predicting 98.74% of the images). If we only provided prediction when the difference is greater than 2, then prediction accuracy would be 100% (but we would reject about 10% of the images).
+
+In comparison, the output of the most accurate SVM model:
+```
+============================== Dataset test1.dat
+apply: nimage=10000 np=32 Nx=28 Ny=28 Nx1=24 Ny1=24 Nx2=12 Ny2=12
+apply: nimage=320000 np=20 Nx=12 Ny=12 Nx1=10 Ny1=10 Nx2=5 Ny2=5
+apply: nimage=6400000 np=10 Nx=5 Ny=5 Nx1=3 Ny1=3 Nx2=3 Ny2=3
+# 57600 points per image
+Predicted 10000 images in 433.415 ms -> 43.3415 us per image
+
+0  9962
+1  9995
+2  9999
+3  10000
+4  10000
+Confidence levels:
+0.25:  9942 out of 9974 (0.996792)
+0.50:  9920 out of 9942 (0.997787)
+0.75:  9895 out of 9911 (0.998386)
+1.00:  9844 out of 9854 (0.998985)
+1.25:  9789 out of 9795 (0.999387)
+1.50:  9722 out of 9723 (0.999897)
+2.00:  9515 out of 9515 (1)
+```
+Base accuracy is 0.9962. If we rejected 0.89% of the images by requiring that the cofidence is greater than 0.75, prediction accuracy would be 0.9984.
