@@ -18,6 +18,8 @@ endif()
 
 add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:${ARCH_FLAGS}>")
 
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
 add_executable(mnist_knn_v1 mnist_knn_v1.cpp getImages.h getImages.cpp)
 
 add_executable(mnist_knn_v2 mnist_knn_v2.cpp getImages.h getImages.cpp)
