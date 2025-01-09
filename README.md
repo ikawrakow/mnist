@@ -6,7 +6,7 @@ This repository contains [k-nearest-neighbors](https://en.wikipedia.org/wiki/K-n
 
 kNN and SVM and not a neural network in the year 2025? Seriously?
 
-I know. But the other day @Nexesenex [was asking](https://github.com/ikawrakow/ik_llama.cpp/issues/133) to update [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) to the latest version of [llama.cpp](https://github.com/ggerganov/llama.cpp). Looking into the @Nexesenex' issue I noticed that there are now efforts to turn [ggml](https://github.com/ggerganov/ggml) into an actual machine learning rather than just an inferrence library, and that there is now a `ggml` [mnist example](https://github.com/ggerganov/ggml/tree/master/examples/mnist) showing how to train simple networks to recognize hand-written digits from the classic [MNIST database](https://yann.lecun.com/exdb/mnist/), which reminded me that many years ago I had experimented with `mnist`. After some searching in old backups I found the code and decided to put here kNN and SVM approaches I had developed. The best of the kNN algorithms arrives at a prediction eror of 0.61%. The SVM algorithm reaches 0.38%. As far as I can tell, these results are nearly SOTA or SOTA for the respective algorithm type (I haven't done any extended literature search, so these claims are based on what I see on the Wikipedia [mnist entry](https://en.wikipedia.org/wiki/MNIST_database), so I may be wrong).   
+I know. But the other day @Nexesenex [was asking](https://github.com/ikawrakow/ik_llama.cpp/issues/133) to update [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) to the latest version of [llama.cpp](https://github.com/ggerganov/llama.cpp). Looking into the @Nexesenex' issue I noticed that there are now efforts to turn [ggml](https://github.com/ggerganov/ggml) into an actual machine learning rather than just an inference library, and that there is now a `ggml` [mnist example](https://github.com/ggerganov/ggml/tree/master/examples/mnist) showing how to train simple networks to recognize hand-written digits from the classic [MNIST database](https://yann.lecun.com/exdb/mnist/), which reminded me that many years ago I had experimented with `mnist`. After some searching in old backups I found the code and decided to put here kNN and SVM approaches I had developed. The best of the kNN algorithms arrives at a prediction error of 0.61%. The SVM algorithm reaches 0.38%. As far as I can tell, these results are nearly SOTA or SOTA for the respective algorithm type (I haven't done any extended literature search, so these claims are based on what I see on the Wikipedia [mnist entry](https://en.wikipedia.org/wiki/MNIST_database), so I may be wrong).   
 
 ### Usage
 
@@ -21,7 +21,7 @@ To run one of the kNN algorithms,
 ```
 ./mnist_knn_vX
 ```
-whete `X` is `1...4` for the 4 versions discussed below. This will "train" the model (no actual training is required for a kNN model, but some versions will add augmented data, see below) and predict that 10,000 `mnist` test images. For convenience, the `mnist` training and test datasets in the `data` subfolder of this repository (required `git-lfs`). This will produce output such as
+where `X` is `1...4` for the 4 versions discussed below. This will "train" the model (no actual training is required for a kNN model, but some versions will add augmented data, see below) and predict that 10,000 `mnist` test images. For convenience, the `mnist` training and test datasets in the `data` sub-folder of this repository (required `git-lfs`). This will produce output such as
 ```
 > ./mnist_knn_v1
 Predicting 10000 test images...done in 1498.61 ms -> 0.149861 ms per image
@@ -51,7 +51,7 @@ neighbors | error (%)
 ```
 that shows the error rate (fraction of mispredicted digits) as a function of the number of nearest neighbors used. I prefer to use the prediction error rather than the prediction accuracy as it better shows the performance of the algorithm (a prediction accuracy of 99% does not feel that much different from 98%, but when looking at error rate, 1% is 2 times between than 2%).
 
-The SVM algorith must first be trained. For a quick example
+The SVM algorithm must first be trained. For a quick example
 ```
 > ./mnist_svm_train 200 0 100
 Pattern::apply: nimage=60000 np=24 Nx=28 Ny=28 Nx1=24 Ny1=24 Nx2=12 Ny2=12
@@ -106,9 +106,9 @@ See below for more details
 
 ### V1
 
-All we need for a kNN model is a similarity (or distance) metric between pairs of images, and handling (sorting) of nearest neighbours. I'm using a very simple class for the latter, see https://github.com/ikawrakow/mnist/blob/2436864a03dcf5fffa77b022ec3915cddc0c3e34/knnHandler.h#L7 The similarity metric comes from my experience with dealing with medical images. It is a combination of the [Pearson correlation coefficient](https://en.wikipedia.org/wiki/Pearson_correlation_coefficient) and a very simple binary feature vector: for every pixel $j$ of the image compare the grey value $A_j$ of the pixel to the grey value of the 4 neghbouring pixels $A_{j,n}$, and set a bit when $A_j > A_{j, n}$. One than simply counts the number of bits that are set in both images being compared (a simple `popcount(a & b)` instruction per 8 pixels). All this is implemented in 38 LOC, see https://github.com/ikawrakow/mnist/blob/e1aa491b050a9bd8b9f7f12152bf73cfa5240a2d/mnist_knn_v1.cpp#L62
+All we need for a kNN model is a similarity (or distance) metric between pairs of images, and handling (sorting) of nearest neighbors. I'm using a very simple class for the latter, see https://github.com/ikawrakow/mnist/blob/2436864a03dcf5fffa77b022ec3915cddc0c3e34/knnHandler.h#L7 The similarity metric comes from my experience with dealing with medical images. It is a combination of the [Pearson correlation coefficient](https://en.wikipedia.org/wiki/Pearson_correlation_coefficient) and a very simple binary feature vector: for every pixel $j$ of the image compare the grey value $A_j$ of the pixel to the grey value of the 4 neighboring pixels $A_{j,n}$, and set a bit when $A_j > A_{j, n}$. One than simply counts the number of bits that are set in both images being compared (a simple `popcount(a & b)` instruction per 8 pixels). All this is implemented in 38 LOC, see https://github.com/ikawrakow/mnist/blob/e1aa491b050a9bd8b9f7f12152bf73cfa5240a2d/mnist_knn_v1.cpp#L62
 
-`mnist_knn_v1` needs 0.15 ms per prediction on my Ryzen-7950X CPU. It arrives at an error rate of 2.6-2.7% (see graph below, which shows prediction error as a function of number of nearest neighbours used). This is is not quite as good as the convolutional network in the `ggml` example, which runs in 0.06 ms/prediction on my CPU and arrives at an error rate of about 2%. 
+`mnist_knn_v1` needs 0.15 ms per prediction on my Ryzen-7950X CPU. It arrives at an error rate of 2.6-2.7% (see graph below, which shows prediction error as a function of number of nearest neighbors used). This is is not quite as good as the convolutional network in the `ggml` example, which runs in 0.06 ms/prediction on my CPU and arrives at an error rate of about 2%. 
 
 ![v1](https://github.com/user-attachments/assets/594ad6f8-1dc9-44ab-968b-37fa1c0c3145)
 
@@ -132,19 +132,19 @@ With some experimentation $\sigma = 6, \alpha = 38$ seem to work quite well. Wit
 
 We have learned that adding translated and deformed versions of the training data is useful for improving prediction accuracy, but this increases the run time significantly. All we need to do now is to a) Combine translations and elastic deformations b) Find a way to skip unlikely training examples via checks that are much cheaper to compute than a full similarity (distance) calculation. This is what is done in `mnist_knn_v4.cpp`. The following two tricks are used to accomplish a) and b)
 * After for-/background thresholding, consider the pixels in the foreground as a point cloud and compute moments $M_{kl} = 1/N \sum (x_i - x_0)^k (y_i - y_0)^l$, where $x_0$ and $y_0$ are the coordinates of the image midpoint, $x_i, y_i$ the coordinates of the $i$'th foreground pixel (all measured in pixels), and $N$ is the number of foreground pixels. In practice it is sufficient to use $M_{20}, M_{02}$ and $M_{11}$. If we pre-compute these for all training samples, we have a computationally very cheap check: we skip all training samples where the $L_2$ Euclidean distance between the moments of the image being predicted and the moments of the training sample is greater than some threshold.
-* We use the x- and y-projections $P(x) = \sum_y A(x, y)$ and $P(y) = \sum_x A(x, y)$ where $A(x, y)$ is the grey value at position $(x, y)$. This allows us to a) qucikly compute a similarity between a test image and a training sample ($28\dot2$ multiply-adds instead of $28^2$ for a full similarity computation), and b) quickly find a translation of the test images where the x- and y-projection best match the training sample. If the projection similarity after translation is greater than some threshold, the training image is skipped.
+* We use the x- and y-projections $P(x) = \sum_y A(x, y)$ and $P(y) = \sum_x A(x, y)$ where $A(x, y)$ is the grey value at position $(x, y)$. This allows us to a) quickly compute a similarity between a test image and a training sample ($28\dot2$ multiply-adds instead of $28^2$ for a full similarity computation), and b) quickly find a translation of the test images where the x- and y-projection best match the training sample. If the projection similarity after translation is greater than some threshold, the training image is skipped.
 
-The resulting algorithm can be found in `mnist_knn_v4.cpp`. It is more complicated than the very simple `mnist_knn_v1-3.cpp`, but still resonably simple with less than 300 LOC. `mnist_knn_v4` has several command-line options that influence the prediction accuracy vs run time tradeoff. Usage is
+The resulting algorithm can be found in `mnist_knn_v4.cpp`. It is more complicated than the very simple `mnist_knn_v1-3.cpp`, but still reasonably simple with less than 300 LOC. `mnist_knn_v4` has several command-line options that influence the prediction accuracy vs run time tradeoff. Usage is
 ```
 ./mnist_knn_v4 [num_neighbors] [n_add] [thresh] [speed] [beta] [nthread]
 ```
 where
 * `num_neighbors` is the number of nearest neighbors to use. This affects run-time/accuracy because there are checks from time to time if all `4 * num_neighbors` nearest neighbors predict the same label and, if so, the calculation is stopped and the corresponding label (digit) is returned as the predicted result. Default value is 5.
-* `n_add` is the number odeformations to add per training sample. This has the largest effect on accuracy and speed (see below for some examples)
+* `n_add` is the number of deformations to add per training sample. This has the largest effect on accuracy and speed (see below for some examples)
 * `thresh` is the threshold used for the projection similarity. Default values is 0.25, one can get slightly higher accuracy by increasing it to 0.33 or even 0.5 at the expense of a slower prediction
 * `speed` can take values of 0, 1 or 2. If 0, the all-same-label check is never performed (see 1st bullet). If 1, the check is done only once after completing all non-deformed training samples (`n_train`). If 2, the check is done after every `n_train` samples. The difference in speed between the 3 options is quite significant with a relatively minor impact on prediction accuracy.
 * `beta` is a parameter that determines the relative importance of the Pearson correlation coefficient and the binary feature similarity described above. It should be left at its default value of 1.
-* `nthread` is the number of threads to use. If missing, `std::thread::hardware_concurrency()` is used. On systems with hyper-threading enabled or systems with a mix of performance and efficiency cores one may want to specify it explicitely to see if performance can be improved.
+* `nthread` is the number of threads to use. If missing, `std::thread::hardware_concurrency()` is used. On systems with hyper-threading enabled or systems with a mix of performance and efficiency cores one may want to specify it explicitly to see if performance can be improved.
 
 Here are some examples of 
 | num_neighbors | n_add | thresh | speed | prediction time (ms) | prediction error (%) |
@@ -188,13 +188,13 @@ where
 
 $$V_{li} = \sum_{j=1}^N B^l_j A_{ij}$$
 
-Here $N_t$ is the number of training examples, $N$ is the number of features, $\Theta$ is the Heaviside step function, and we have added a [Tikhonov regularization](https://en.wikipedia.org/wiki/Ridge_regression) term proprtional to $\lambda$ to (hopefully) reduce overfitting. There are $10 \cdot N$ free parameters. This is a slight departure from a classic SVM as we are aiming for a gap of $\pm 1$, which I think works slightly better for this particular dataset.
+Here $N_t$ is the number of training examples, $N$ is the number of features, $\Theta$ is the Heaviside step function, and we have added a [Tikhonov regularization](https://en.wikipedia.org/wiki/Ridge_regression) term proportional to $\lambda$ to (hopefully) reduce overfitting. There are $10 \cdot N$ free parameters. This is a slight departure from a classic SVM as we are aiming for a gap of $\pm 1$, which I think works slightly better for this particular dataset.
 
 [L-BFGS](https://en.wikipedia.org/wiki/Limited-memory_BFGS) is used to minimize $F$, see `bfgs.h` and `bfgs.cpp`.
 
 ### Data augmentation
 
-As with kNN, it is useful to add augmented data to the training set. Unlike kNN, where elastic deformations are used, here affine transformations of the original `mnist` dataset work better. Random rotation angles in $\pm 12.5$ degrees, sheering in $\pm 0.6$, and translations within $\pm 1.4$ pixels are sampled to compose the affine transformations.
+As with kNN, it is useful to add augmented data to the training set. Unlike kNN, where elastic deformations are used, here Affine transformations of the original `mnist` dataset work better. Random rotation angles in $\pm 12.5$ degrees, sheering in $\pm 0.6$, and translations within $\pm 1.4$ pixels are sampled to compose the Affine transformations.
 
 ### Patterns
 
@@ -215,25 +215,25 @@ The training code takes several command line parameters:
 ```
 where
 * `num_iterations` is the maximum number of iterations to run. It is set by default to 200, but one should typically use more. If convergence is reached, the iteration will be terminated.
-* `n_add` is the number of augmented images to add per original `mnist` image. Note, however, that this is very hacky: if `n_add > 0`, `n_add` elasticly deformed images will be added. If `n_add < 0` (which one should always use), `-n_add` affine-transformed images will be added. If `n_add > 100`, then `n_add - 100` elastic deformations **and** `n_add - 99` affine transfromations will be added. A big caveat is that I have not bothered implementing batching, so all augmented images are added, and the features are computed and held in RAM. This puts a limit on how much augmented data one can add (depending on RAM available). E.g., with 9 added affine transformations,one has 600,000 images, so 7.2 GB of RAM are needed for Type "0" pattern and 34.6 GB for the Type "4" pattern.
-* `lambda` is the Tikhonov regularization parameter. There is no precise science behind this, so determining good values is a matter of experimentation. Typically `lambda` should be in the ranhe `10...100`
+* `n_add` is the number of augmented images to add per original `mnist` image. Note, however, that this is very hacky: if `n_add > 0`, `n_add` elastically deformed images will be added. If `n_add < 0` (which one should always use), `-n_add` Affine-transformed images will be added. If `n_add > 100`, then `n_add - 100` elastic deformations **and** `n_add - 99` Affine transformations will be added. A big caveat is that I have not bothered implementing batching, so all augmented images are added, and the features are computed and held in RAM. This puts a limit on how much augmented data one can add (depending on RAM available). E.g., with 9 added Affine transformations,one has 600,000 images, so 7.2 GB of RAM are needed for Type "0" pattern and 34.6 GB for the Type "4" pattern.
+* `lambda` is the Tikhonov regularization parameter. There is no precise science behind this, so determining good values is a matter of experimentation. Typically `lambda` should be in the range `10...100`
 * `type` is the pattern type, so 0...4
 * `output_file` is the file name to use to store the trained model. If missing, `test.dat` is used
-* `random_sequence` is the random number sequence to use (for the random number generator used to generate random deformations and affine transformations). Should be left at zero, unless one wants to experiment with training multiple models using different sets of added augmented data, and then to combine the results somehow
+* `random_sequence` is the random number sequence to use (for the random number generator used to generate random deformations and Affine transformations). Should be left at zero, unless one wants to experiment with training multiple models using different sets of added augmented data, and then to combine the results somehow
 * `n_history` is the number of past iterations to keep in the L-BFGS history. 100 is a good value for this
-* `max_translation` is the macximum translation contained in affine transformations expressed as a fraction of the image size. 0.05 is the default value (so 1.4 pixels).
+* `max_translation` is the maximum translation contained in Affine transformations expressed as a fraction of the image size. 0.05 is the default value (so 1.4 pixels).
 
 To very quickly train a model:
 ```
 ./mnist_svm_train 200 0 100 fast_model.dat"
 ```
-No augmented data will be added. Run time is about 5 seconds on my Ryzen-7950X CPU and results in a model with a prediction error of 0.78%. Because we did not add any additional data, it is necessary to use a larger `lambda` (100 in this case) to avoid overfoitting.
+No augmented data will be added. Run time is about 5 seconds on my Ryzen-7950X CPU and results in a model with a prediction error of 0.78%. Because we did not add any additional data, it is necessary to use a larger `lambda` (100 in this case) to avoid overfitting.
 
 To train a small, but quite accurate model:
 ```
 ./mnist_svm_train 400 -19 10 small_model.dat 0 100 0.075
 ```
-This will add 19 affine transformations, so we have 1.2 million training samples for 12,000 free parameters. Hence, `lambda` can be relatively small (10 in this case). This runs in 112 seconds and produces a model with an error rate of 0.5%.
+This will add 19 Affine transformations, so we have 1.2 million training samples for 12,000 free parameters. Hence, `lambda` can be relatively small (10 in this case). This runs in 112 seconds and produces a model with an error rate of 0.5%.
 
 To train the most accurate model (128+ GB of RAM required):
 ```
