@@ -49,7 +49,7 @@ neighbors | error (%)
     19    |  3.200
     20    |  3.160
 ```
-that shows the error rate (fraction of mispredicted digits) as a function of the number of nearest neighbors used. I prefer to use the prediction error rather than the prediction accuracy as it better shows the performance of the algorithm (a prediction accuracy of 99% does not feel that much different from 98%, but when looking at error rate, 1% is 2 times between than 2%).
+that shows the error rate (fraction of mispredicted digits) as a function of the number of nearest neighbors used. I prefer to use the prediction error rather than the prediction accuracy as it better shows the performance of the algorithm (a prediction accuracy of 99% does not feel that much different from 98%, but when looking at error rate, 1% is 2 times better than 2%).
 
 The SVM algorithm must first be trained. For a quick example
 ```
@@ -108,13 +108,13 @@ See below for more details
 
 All we need for a kNN model is a similarity (or distance) metric between pairs of images, and handling (sorting) of nearest neighbors. I'm using a very simple class for the latter, see https://github.com/ikawrakow/mnist/blob/2436864a03dcf5fffa77b022ec3915cddc0c3e34/knnHandler.h#L7 The similarity metric comes from my experience with dealing with medical images. It is a combination of the [Pearson correlation coefficient](https://en.wikipedia.org/wiki/Pearson_correlation_coefficient) and a very simple binary feature vector: for every pixel $j$ of the image compare the grey value $A_j$ of the pixel to the grey value of the 4 neighboring pixels $A_{j,n}$, and set a bit when $A_j > A_{j, n}$. One than simply counts the number of bits that are set in both images being compared (a simple `popcount(a & b)` instruction per 8 pixels). All this is implemented in 38 LOC, see https://github.com/ikawrakow/mnist/blob/e1aa491b050a9bd8b9f7f12152bf73cfa5240a2d/mnist_knn_v1.cpp#L62
 
-`mnist_knn_v1` needs 0.15 ms per prediction on my Ryzen-7950X CPU. It arrives at an error rate of 2.6-2.7% (see graph below, which shows prediction error as a function of number of nearest neighbors used). This is is not quite as good as the convolutional network in the `ggml` example, which runs in 0.06 ms/prediction on my CPU and arrives at an error rate of about 2%. 
+`mnist_knn_v1` needs 0.15 ms per prediction on my Ryzen-7950X CPU. It arrives at an error rate of 2.6-2.7% (see graph below, which shows prediction error as a function of number of nearest neighbors used). This is not quite as good as the convolutional network in the `ggml` example, which runs in 0.06 ms/prediction on my CPU and arrives at an error rate of about 2%. 
 
 ![v1](https://github.com/user-attachments/assets/594ad6f8-1dc9-44ab-968b-37fa1c0c3145)
 
 ### V2
 
-How can we improve? Let's add some translations. Basically, take each training image and add shifted versions of it within `-smax...smax` (in x- and y-directions), where `smax` is a command line parameter to `mnist_knn_v2.cpp`. This indeed improves the prediction accuracy as can be seen in the following graph, which shows results for `smax = 1` (i.e., shifts of +/- 1 pixel). Prediction accuracy is now ~1.9%, so on par with the `ggml` `mnist` example. But this comes at the e4pxense of a much longer run time - 1.4 ms per prediction.
+How can we improve? Let's add some translations. Basically, take each training image and add shifted versions of it within `-smax...smax` (in x- and y-directions), where `smax` is a command line parameter to `mnist_knn_v2.cpp`. This indeed improves the prediction accuracy as can be seen in the following graph, which shows results for `smax = 1` (i.e., shifts of +/- 1 pixel). Prediction accuracy is now ~1.9%, so on par with the `ggml` `mnist` example. But this comes at the expense of a much longer run time - 1.4 ms per prediction.
 
 ![v2](https://github.com/user-attachments/assets/1022b986-a015-4acc-bbbc-157f97157737)
 
@@ -132,7 +132,7 @@ With some experimentation $\sigma = 6, \alpha = 38$ seem to work quite well. Wit
 
 We have learned that adding translated and deformed versions of the training data is useful for improving prediction accuracy, but this increases the run time significantly. All we need to do now is to a) Combine translations and elastic deformations b) Find a way to skip unlikely training examples via checks that are much cheaper to compute than a full similarity (distance) calculation. This is what is done in `mnist_knn_v4.cpp`. The following two tricks are used to accomplish a) and b)
 * After for-/background thresholding, consider the pixels in the foreground as a point cloud and compute moments $M_{kl} = 1/N \sum (x_i - x_0)^k (y_i - y_0)^l$, where $x_0$ and $y_0$ are the coordinates of the image midpoint, $x_i, y_i$ the coordinates of the $i$'th foreground pixel (all measured in pixels), and $N$ is the number of foreground pixels. In practice it is sufficient to use $M_{20}, M_{02}$ and $M_{11}$. If we pre-compute these for all training samples, we have a computationally very cheap check: we skip all training samples where the $L_2$ Euclidean distance between the moments of the image being predicted and the moments of the training sample is greater than some threshold.
-* We use the x- and y-projections $P(x) = \sum_y A(x, y)$ and $P(y) = \sum_x A(x, y)$ where $A(x, y)$ is the grey value at position $(x, y)$. This allows us to a) quickly compute a similarity between a test image and a training sample ($28\dot2$ multiply-adds instead of $28^2$ for a full similarity computation), and b) quickly find a translation of the test images where the x- and y-projection best match the training sample. If the projection similarity after translation is greater than some threshold, the training image is skipped.
+* We use the x- and y-projections $P(x) = \sum_y A(x, y)$ and $P(y) = \sum_x A(x, y)$ where $A(x, y)$ is the grey value at position $(x, y)$. This allows us to a) quickly compute a similarity between a test image and a training sample ($28\cdot2$ multiply-adds instead of $28^2$ for a full similarity computation), and b) quickly find a translation of the test images where the x- and y-projection best match the training sample. If the projection similarity after translation is greater than some threshold, the training image is skipped.
 
 The resulting algorithm can be found in `mnist_knn_v4.cpp`. It is more complicated than the very simple `mnist_knn_v1-3.cpp`, but still reasonably simple with less than 300 LOC. `mnist_knn_v4` has several command-line options that influence the prediction accuracy vs run time tradeoff. Usage is
 ```
@@ -157,7 +157,7 @@ Here are some examples of run times and prediction error for different command l
 | 8 | 500 | 0.33 | 2 | 3.06 | 0.64 |
 | 8 | 500 | 0.33 | 1 | 17.39 | 0.61 |
 
-An error rate of 0.61% is nearly SOTA for kNN. As far as I can tell, [this paper](https://pubmed.ncbi.nlm.nih.gov/17568145) is the only reporting a lower error rate (0.54%). It cannot compete with modern neural networks, but it does beat the `ggml` `mnist` example by a huge margin, and it was only surpassed by a neural network around 2010 or some such. The graph below summarizes the results for the 4 kNN versions.
+An error rate of 0.61% is nearly SOTA for kNN. As far as I can tell, [this paper](https://pubmed.ncbi.nlm.nih.gov/17568145) is the only one reporting a lower error rate (0.54%). It cannot compete with modern neural networks, but it does beat the `ggml` `mnist` example by a huge margin, and it was only surpassed by a neural network around 2010 or some such. The graph below summarizes the results for the 4 kNN versions.
 
 
 ![v4](https://github.com/user-attachments/assets/7cc164e4-f563-40f2-b6b8-28044f1f2e7f)
@@ -166,7 +166,7 @@ An error rate of 0.61% is nearly SOTA for kNN. As far as I can tell, [this paper
 
 ### Algorithm description
 
-To train an SVM algorithm that recognizes a given digit $l$, one looks for a plane $B^l_j$ in an $N$ dimensional "image feature" space such that $y^l_i \sum B^l_j A_{ij} > 0$, where $A_{ij}$ are the "features" of image $i$, and $y^l_i = +1$ when the image is digit $l$ or $y^l_i = -1$ otherwise. The simplest possible set of "features" in the context of `mnist` would simply the $28^2 = 784$ image grey values. One does not get very far with this, so here we prepare a feature set for an image by
+To train an SVM algorithm that recognizes a given digit $l$, one looks for a plane $B^l_j$ in an $N$ dimensional "image feature" space such that $y^l_i \sum B^l_j A_{ij} > 0$, where $A_{ij}$ are the "features" of image $i$, and $y^l_i = +1$ when the image is digit $l$ or $y^l_i = -1$ otherwise. The simplest possible set of "features" in the context of `mnist` would simply be the $28^2 = 784$ image grey values. One does not get very far with this, so here we prepare a feature set for an image by
 1. Let $G_j$ be the grey values of an image (`uint8_t` in the range `0...255` for `mnist`)
 2. Let $\Delta_1$ and $\Delta_2$ be offsets relative to an image pixel ($\Delta_1 \neq \Delta_2$)
 3. Let $O(j, \Delta_1, \Delta_2) = G_{j+\Delta_1} - G_{j+\Delta_2}$, if $G_{j+\Delta_1} \geq G_{j+\Delta_2}, O(j, \Delta_1, \Delta_2) = 0$ otherwise
@@ -225,7 +225,7 @@ where
 
 To very quickly train a model:
 ```
-./bin/mnist_svm_train 200 0 100 fast_model.dat"
+./bin/mnist_svm_train 200 0 100 fast_model.dat
 ```
 No augmented data will be added. Run time is about 5 seconds on my Ryzen-7950X CPU and results in a model with a prediction error of 0.78%. Because we did not add any additional data, it is necessary to use a larger `lambda` (100 in this case) to avoid overfitting.
 
@@ -233,7 +233,7 @@ To train a small, but quite accurate model:
 ```
 ./bin/mnist_svm_train 400 -19 10 small_model.dat 0 100 0.075
 ```
-This will add 19 Affine transformations, so we have 1.2 million training samples for 12,000 free parameters. Hence, `lambda` can be relatively small (10 in this case). This runs in 112 seconds and produces a model with an error rate of 0.5%.
+This will add 19 Affine transformations, so we have 1.2 million training samples for 120,000 free parameters. Hence, `lambda` can be relatively small (10 in this case). This runs in 112 seconds and produces a model with an error rate of 0.5%.
 
 To train the most accurate model (128+ GB of RAM required):
 ```
@@ -271,7 +271,7 @@ This will predict the 10,000 test images from the `mnist` database and will prin
 Prediction time is about 10 us/image for the small model (12,000 features), and about 45 us/image for the large model (57,600 features).
 
 The digit for test image $i$ is predicted by
-* Computing the image features $A_{ij}$ according to the trained patterns
+* Computing the image features $A_{ij}$ according to the patterns used during training (they are stored in the trained model file)
 * Computing $V^l_i = \sum B^l_j A_{ij}$ for $l = 0 ... 9$
 * Using as prediction the $l$ for which $V^l_i$ is maximum
 
